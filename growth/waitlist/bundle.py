@@ -20,18 +20,25 @@ MAIL_KINDS = ("confirm", "welcome", "movedup", "again")
 PAGE_KINDS = ("confirm", "leave")
 
 
-def worker_config(project: Any, ui: dict[str, dict[str, str]]) -> dict[str, Any]:
+def worker_config(project: Any, ui: dict[str, dict[str, str]], languages: list[str] | None = None) -> dict[str, Any]:
     conf = project.raw["waitlist"]
     pages = load_pages(project)
-    status_page = pages[conf.get("status_page", "waitlist")]
+    languages = languages or project.languages
+    status_pages = {"player": pages[conf.get("status_page", "waitlist")]}
+    status_pages["host"] = pages.get(str(conf.get("host_status_page", "")), status_pages["player"])
     role_pages = {"player": pages[project.site.get("home", "player")], "host": pages[project.site.get("host_home", "host")]}
     brand = str(project.brand["name"])
-    legal = str(project.site.get("legal_notice", ""))
-    legal_url = project.site["base_url"] + legal if legal else ""
 
-    def strings(prefix: str, kinds: tuple[str, ...], parts: tuple[str, ...]) -> dict[str, dict[str, str]]:
+    def legal_url(lang: str) -> str:
+        value = str(project.site.get("legal_notice", "") or "")
+        if value in pages:
+            spec = pages[value].langs.get(lang) or pages[value].langs[project.default_language]
+            return project.site["base_url"] + spec.path
+        return project.site["base_url"] + value if value else ""
+
+    def strings(prefix: str, kinds: tuple[str, ...], parts: tuple[str, ...], optional_host: bool = False) -> dict[str, dict[str, str]]:
         out: dict[str, dict[str, str]] = {}
-        for lang in project.languages:
+        for lang in languages:
             table = ui.get(lang, {})
             out[lang] = {}
             for kind in kinds:
@@ -39,38 +46,50 @@ def worker_config(project: Any, ui: dict[str, dict[str, str]]) -> dict[str, Any]
                     key = f"{prefix}{kind}_{part}"
                     if key not in table:
                         raise KeyError(f"ui.toml [{lang}] is missing {key!r} (waitlist mails and pages)")
-                    out[lang][f"{kind}_{part}"] = table[key].replace("{brand}", brand).replace("{legal_url}", legal_url)
+                    out[lang][f"{kind}_{part}"] = table[key].replace("{brand}", brand).replace("{legal_url}", legal_url(lang))
+                    host_key = f"{prefix}host_{kind}_{part}"  # hosts may get their own wording
+                    if optional_host and host_key in table:
+                        out[lang][f"host_{kind}_{part}"] = table[host_key].replace("{brand}", brand).replace("{legal_url}", legal_url(lang))
         return out
+
+    analytics = project.analytics if project.analytics.get("provider") == "posthog" else {}
 
     return {
         "brand": brand,
         "baseUrl": project.site["base_url"],
-        "languages": project.languages,
+        "site": project.id,
+        "wordmark": str(project.brand.get("wordmark", brand)),
+        "languages": languages,
         "defaultLanguage": project.default_language,
+        "home": {lang: spec.path for lang, spec in role_pages["player"].langs.items() if lang in languages},
         "paths": {
-            "status": {lang: spec.path for lang, spec in status_page.langs.items()},
+            "status": {
+                role: {lang: spec.path for lang, spec in page.langs.items() if lang in languages} for role, page in status_pages.items()
+            },
             "player": role_pages["player"].langs[project.default_language].path,
             "host": role_pages["host"].langs[project.default_language].path,
         },
-        "rolePaths": {role: {lang: spec.path for lang, spec in page.langs.items()} for role, page in role_pages.items()},
+        "rolePaths": {role: {lang: spec.path for lang, spec in page.langs.items() if lang in languages} for role, page in role_pages.items()},
         "moveUpPerReferral": int(conf.get("move_up_per_referral", 5)),
         "maxCreditedReferrals": int(conf.get("max_credited_referrals", 50)),
         "movedUpMail": bool(conf.get("moved_up_mail", True)),
         "counterMin": int(conf.get("counter_min", 0)),
-        "signupsPerIpHour": int(conf.get("signups_per_ip_hour", 5)),
+        "signupsPerIpHour": int(conf.get("signups_per_ip_hour", 40)),
         "email": {"provider": str(conf.get("email_provider", "log")), "from": str(conf.get("email_from", ""))},
-        "mail": strings("mail_", MAIL_KINDS, ("subject", "body")),
+        "mail": strings("mail_", MAIL_KINDS, ("subject", "body"), optional_host=True),
         "pages": strings("action_", PAGE_KINDS, ("title", "text", "button")),
+        # Cookieless analytics relay: the project key is a public write-only key, kept in the private home.
+        "analytics": {"host": str(analytics.get("capture_host", "")), "key": str(analytics.get("project_api_key", ""))},
     }
 
 
-def write_bundle(project: Any, ui: dict[str, dict[str, str]], out: Path) -> None:
+def write_bundle(project: Any, ui: dict[str, dict[str, str]], out: Path, languages: list[str] | None = None) -> None:
     conf = project.raw["waitlist"]
     worker = out / "worker"
     worker.mkdir(parents=True, exist_ok=True)
     shutil.copy2(HERE / "waitlist.js", worker / "waitlist.js")
     shutil.copy2(HERE / "schema.sql", out / "schema.sql")
-    config = json.dumps(worker_config(project, ui), ensure_ascii=False, indent=2)
+    config = json.dumps(worker_config(project, ui, languages), ensure_ascii=False, indent=2)
     write_atomic(worker / "config.js", f"// Generated by growth-engine from projects/{project.id}; do not edit.\nexport default {config};\n")
     write_atomic(
         worker / "index.js",

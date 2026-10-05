@@ -13,8 +13,12 @@ CREATE TABLE IF NOT EXISTS signups (
   referrals INTEGER NOT NULL DEFAULT 0,
   source TEXT NOT NULL,
   page TEXT NOT NULL DEFAULT '',
+  country TEXT NOT NULL DEFAULT '',          -- two letters from Cloudflare's geolocation, for the in-zone goal
+  anon TEXT NOT NULL DEFAULT '',             -- random analytics id from the sign-up page, never linked to the email
   created_at TEXT NOT NULL,
   mail_sent_at TEXT,
+  mail_day TEXT,
+  mails_today INTEGER NOT NULL DEFAULT 0,
   confirmed_at TEXT,
   moved_up_mail_at TEXT
 );

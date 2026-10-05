@@ -13,7 +13,10 @@ const CONFIG = {
   baseUrl: "https://kiln.example",
   languages: ["en", "de"],
   defaultLanguage: "en",
-  paths: { status: { en: "/waitlist/", de: "/de/warteliste/" }, player: "/", host: "/host/" },
+  site: "example",
+  wordmark: "KILN",
+  home: { en: "/", de: "/de/" },
+  paths: { status: { player: { en: "/waitlist/", de: "/de/warteliste/" }, host: { en: "/host/status/" } }, player: "/", host: "/host/" },
   rolePaths: { player: { en: "/", de: "/de/" }, host: { en: "/host/" } },
   moveUpPerReferral: 5,
   maxCreditedReferrals: 50,
@@ -33,7 +36,10 @@ const CONFIG = {
     ]),
   ),
   pages: { en: { confirm_title: "Confirm", confirm_text: "One click.", confirm_button: "Confirm", leave_title: "Leave", leave_text: "Bye.", leave_button: "Leave" } },
+  analytics: { host: "https://eu.i.posthog.example", key: "phc_test" },
 };
+CONFIG.mail.en.host_welcome_subject = "host welcome {brand}";
+CONFIG.mail.en.host_welcome_body = "host welcome {status_url} {leave_url}";
 
 class D1 {
   constructor() {
@@ -68,20 +74,26 @@ function setup(overrides = {}) {
   const sent = [];
   const env = { DB: new D1(), STATS_TOKEN: "stats-secret", HASH_SALT: "salt", ...overrides.env };
   let down = false;
+  let clock = Date.parse("2026-10-05T12:00:00Z");
+  const relayed = [];
   const handle = makeHandler({ ...CONFIG, ...overrides.config }, {
     sendMail: async (_env, mail) => {
       if (down) throw new Error("mail provider answered 503");
       sent.push(mail);
     },
+    now: () => new Date(clock),
+    capture: async (_env, events) => relayed.push(...events),
   });
   let ip = 0;
   const call = (path, init = {}) => {
     const headers = new Headers(init.headers || {});
     if (!headers.has("cf-connecting-ip")) headers.set("cf-connecting-ip", `10.0.0.${++ip}`);
-    return handle(new Request(`https://kiln.example${path}`, { ...init, headers, redirect: "manual" }), env);
+    const request = new Request(`https://kiln.example${path}`, { ...init, headers, redirect: "manual" });
+    if (init.country) Object.defineProperty(request, "cf", { value: { country: init.country } });
+    return handle(request, env);
   };
-  const signup = (body, headers = {}) =>
-    call("/api/waitlist", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ role: "player", lang: "en", ...body }) });
+  const signup = (body, headers = {}, country = "DE") =>
+    call("/api/waitlist", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ role: "player", lang: "en", ...body }), country });
   const confirm = (t) => call("/api/waitlist/confirm", { method: "POST", body: new URLSearchParams({ t }) });
   const tokenFrom = (mail, key) => new URL(mail.text.split(" ").find((w) => w.includes(`${key}=`))).searchParams.get(key);
   const join = async (email, ref) => {
@@ -90,7 +102,8 @@ function setup(overrides = {}) {
     const res = await confirm(tokenFrom(mail, "t"));
     return new URL(res.headers.get("location")).hash.slice(3);
   };
-  return { env, sent, call, signup, confirm, join, tokenFrom, mailDown: (value) => (down = value) };
+  const later = (minutes) => (clock += minutes * 60e3);
+  return { env, sent, call, signup, confirm, join, tokenFrom, relayed, later, mailDown: (value) => (down = value) };
 }
 
 const row = (env, email) => env.DB.db.prepare("SELECT * FROM signups WHERE email = ?").get(email);
@@ -110,8 +123,11 @@ test("double opt-in: nobody is on the list until they confirm", async () => {
   assert.ok(row(env, "ada@example.org").confirmed_at);
   assert.equal(sent.at(-1).subject, "welcome Kiln");
   assert.match(sent.at(-1).text, / 1 /, "first in line");
-  assert.equal((await confirm(t)).status, 303, "a used link just lands on the expired notice");
-  assert.equal(sent.length, 2);
+  assert.match(sent.at(-1).text, /https:\/\/kiln\.example\/waitlist\/#s=/, "the status link in the mail is absolute");
+  const again = await confirm(t);
+  assert.equal(again.status, 303);
+  assert.match(again.headers.get("location"), /\/waitlist\/\?e=already$/, "a reused link says you're already in");
+  assert.equal(sent.length, 2, "no extra mail within ten minutes");
 });
 
 test("mail scanners that only GET a confirm link confirm nothing", async () => {
@@ -150,7 +166,7 @@ test("an unconfirmed inviter earns nothing and the same address can't sign up tw
   const res = await signup({ email: "solo@example.org" });
   assert.equal(res.status, 202, "same answer, so the form reveals nothing");
   assert.equal(env.DB.db.prepare("SELECT COUNT(*) AS n FROM signups").get().n, 2);
-  assert.equal(sent.filter((m) => m.to === "solo@example.org").length, 1, "no second mail within a day");
+  assert.equal(sent.filter((m) => m.to === "solo@example.org").length, 1, "no second mail within ten minutes");
 });
 
 test("bots, bad addresses, floods and a closed list", async () => {
@@ -160,7 +176,7 @@ test("bots, bad addresses, floods and a closed list", async () => {
   assert.equal((await signup({ email: "not-an-address" })).status, 400);
   const ip = { "cf-connecting-ip": "203.0.113.9" };
   const codes = [];
-  for (let i = 0; i < 7; i++) codes.push((await signup({ email: `flood${i}@example.org` }, ip)).status);
+  for (let i = 0; i < 7; i++) codes.push((await signup({ email: `flood${i}@example.org` }, ip)).status); // limit 5 in this config
   assert.deepEqual(codes, [202, 202, 202, 202, 202, 429, 429]);
   const closed = setup({ config: { email: { provider: "brevo", from: "" } } });
   assert.equal((await closed.signup({ email: "early@example.org" })).status, 503);
@@ -225,7 +241,7 @@ test("confirming twice at once credits the inviter once and sends one welcome ma
   const t = tokenFrom(sent.at(-1), "t");
   const [a, b] = await Promise.all([confirm(t), confirm(t)]);
   assert.deepEqual([a.status, b.status], [303, 303]);
-  assert.equal([a, b].filter((r) => /e=expired/.test(r.headers.get("location"))).length, 1);
+  assert.equal([a, b].filter((r) => /e=already/.test(r.headers.get("location"))).length, 1);
   assert.equal(row(env, "inviter@example.org").referrals, 1);
   assert.equal(sent.filter((m) => m.to === "twice@example.org" && m.subject.startsWith("welcome")).length, 1);
 });
@@ -259,4 +275,127 @@ test("sources are classified without storing the full referrer", () => {
   assert.equal(classify("Newsletter!", ""), "newsletter");
   assert.equal(classify("", ""), "direct");
   assert.equal(classify("", "https://forum.example.net/thread/1"), "forum.example.net");
+});
+
+test("a lost confirmation mail can be sent again after ten minutes, at most three a day", async () => {
+  const { sent, signup, later } = setup();
+  await signup({ email: "lost@example.org" });
+  await signup({ email: "lost@example.org" });
+  assert.equal(sent.length, 1, "not within ten minutes");
+  later(11);
+  await signup({ email: "lost@example.org" });
+  later(11);
+  await signup({ email: "lost@example.org" });
+  later(11);
+  await signup({ email: "lost@example.org" });
+  assert.equal(sent.length, 3, "three confirmation mails a day at most");
+  later(24 * 60);
+  await signup({ email: "lost@example.org" });
+  assert.equal(sent.length, 4, "a new day allows a new mail");
+});
+
+test("a reused confirm link mails the status link again once the throttle allows it", async () => {
+  const { sent, signup, confirm, tokenFrom, later } = setup();
+  await signup({ email: "again@example.org" });
+  const t = tokenFrom(sent[0], "t");
+  await confirm(t);
+  later(11);
+  const res = await confirm(t);
+  assert.match(res.headers.get("location"), /e=already/);
+  assert.ok(sent.at(-1).subject.startsWith("again"));
+  assert.match(sent.at(-1).text, /https:\/\/kiln\.example\/waitlist\/#s=/);
+});
+
+test("the moved-up mail comes only on a real move and carries a working leave link", async () => {
+  const { env, sent, join, call, tokenFrom } = setup();
+  await join("first@example.org");
+  const code = row(env, "first@example.org").code;
+  await join("friend1@example.org", code);
+  assert.equal(sent.filter((m) => m.subject.startsWith("movedup")).length, 0, "already first in line: nothing moved, no mail");
+  for (let i = 0; i < 6; i++) await join(`p${i}@example.org`);
+  const late = row(env, "p5@example.org").code;
+  await join("friend2@example.org", late);
+  const moved = sent.find((m) => m.to === "p5@example.org" && m.subject.startsWith("movedup"));
+  assert.ok(moved);
+  const leave = new URL(moved.text.split(" ").find((w) => w.includes("/api/waitlist/leave")));
+  const res = await call("/api/waitlist/leave", { method: "POST", body: new URLSearchParams({ c: leave.searchParams.get("c"), l: leave.searchParams.get("l"), lang: "de" }) });
+  assert.equal(res.headers.get("location"), "https://kiln.example/de/warteliste/?left=1", "the language survives");
+  assert.equal(row(env, "p5@example.org"), undefined);
+  const forged = await call("/api/waitlist/leave", { method: "POST", body: new URLSearchParams({ c: row(env, "first@example.org").code, l: "x".repeat(32) }) });
+  assert.equal(forged.status, 303);
+  assert.ok(row(env, "first@example.org"), "a guessed leave token deletes nothing");
+  assert.ok(tokenFrom);
+});
+
+test("hosts land on their own status page and get their own mails", async () => {
+  const { sent, signup, confirm, tokenFrom } = setup();
+  const res = await signup({ email: "host@example.org", role: "host" });
+  assert.equal(res.status, 202);
+  const done = await confirm(tokenFrom(sent[0], "t"));
+  assert.match(done.headers.get("location"), /^https:\/\/kiln\.example\/host\/status\/\?new=1#s=/);
+  assert.equal(sent.at(-1).subject, "host welcome Kiln");
+});
+
+test("the country is stored for the in-zone goal, and stats report it", async () => {
+  const { call, signup, confirm, sent, tokenFrom, env } = setup();
+  await signup({ email: "nl@example.org" }, {}, "NL");
+  await confirm(tokenFrom(sent.at(-1), "t"));
+  await signup({ email: "us@example.org" }, {}, "US");
+  await confirm(tokenFrom(sent.at(-1), "t"));
+  assert.equal(row(env, "nl@example.org").country, "NL");
+  const stats = await (await call("/api/waitlist/stats", { headers: { authorization: "Bearer stats-secret" } })).json();
+  assert.deepEqual(stats.countries.map((c) => c.country).sort(), ["NL", "US"]);
+  assert.ok(stats.days.every((d) => "country" in d));
+});
+
+test("analytics: only listed events and properties are relayed, with no IP, email or person profile", async () => {
+  const { call, relayed, signup, confirm, sent, tokenFrom } = setup();
+  const anon = "a1b2c3d4-0000-4000-8000-000000000000";
+  const res = await call("/api/e", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    country: "AT",
+    body: JSON.stringify({
+      anon,
+      events: [
+        { event: "$pageview", props: { path: "/", lang: "de", email: "leak@example.org", utm_source: "reddit" } },
+        { event: "something_else", props: {} },
+      ],
+    }),
+  });
+  assert.equal(res.status, 204);
+  assert.equal(relayed.length, 1);
+  const [view] = relayed;
+  assert.equal(view.event, "$pageview");
+  assert.equal(view.distinct_id, anon);
+  assert.equal(view.properties.country, "AT");
+  assert.equal(view.properties.site, "example");
+  assert.equal(view.properties.email, undefined, "properties outside the list are dropped");
+  assert.equal(view.properties.$process_person_profile, false);
+  assert.equal(view.properties.$ip, null);
+  await signup({ email: "funnel@example.org", anon }, {}, "AT");
+  await confirm(tokenFrom(sent.at(-1), "t"));
+  const names = relayed.map((e) => e.event);
+  assert.deepEqual(names.slice(1), ["waitlist_signup", "waitlist_confirmed"]);
+  assert.ok(relayed.every((e) => !JSON.stringify(e).includes("funnel@example.org")), "no email in any event");
+  assert.equal(relayed.at(-1).distinct_id, anon, "the funnel links by the page's random id only");
+});
+
+test("an expired confirm link and a bad request keep the language", async () => {
+  const { call } = setup();
+  const res = await call("/api/waitlist/confirm", { method: "POST", body: new URLSearchParams({ t: "x".repeat(32), lang: "de" }) });
+  assert.equal(res.headers.get("location"), "https://kiln.example/de/warteliste/?e=expired");
+  const page = await call("/api/waitlist/confirm?t=abc&lang=en");
+  const html = await page.text();
+  assert.match(html, /<title>Confirm \| Kiln<\/title>/);
+  assert.match(html, /class="wordmark"/);
+  assert.match(html, /name="lang" value="en"/);
+});
+
+test("the same address signing up twice at once gets the same answer and one mail", async () => {
+  const { env, sent, signup } = setup();
+  const [a, b] = await Promise.all([signup({ email: "race@example.org" }), signup({ email: "race@example.org" })]);
+  assert.deepEqual([a.status, b.status], [202, 202]);
+  assert.equal(env.DB.db.prepare("SELECT COUNT(*) AS n FROM signups WHERE email = ?").get("race@example.org").n, 1);
+  assert.equal(sent.filter((m) => m.to === "race@example.org").length, 1);
 });
