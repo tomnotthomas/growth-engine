@@ -170,6 +170,25 @@ class TrafficFunnel(unittest.TestCase):
         self.assertIn('<td>referral_sent</td><td class="num">9</td>', html)
         self.assertNotIn("None", markdown + html)
 
+    def test_an_estimate_is_labelled_in_both_renders(self) -> None:
+        from growth.jobs.digest_render import render_html, render_markdown
+        from growth.site.html import esc
+
+        label = "PostHog (estimate: waitlist ledger not reachable)"
+        project = {
+            "name": "Kiln",
+            "goal": {"name": "confirmed sign-ups", "target": 100, "confirmed_total": 4, "status": "behind plan", "numbers_from": label},
+            "traffic": {"connected": False, "why": "off"},
+            "site": {"pages": 3, "indexable": 0, "last_build": "never", "public": False},
+            "reddit_drafts_waiting": 0,
+            "jobs": {},
+            "problems": [],
+            "blocked": [],
+        }
+        facts = {"week": {"from": "2026-09-28", "to": "2026-10-05"}, "ai": {"runs_7d": 0, "budget_per_week": 10}, "projects": [project]}
+        self.assertIn(f"- Numbers from: {label}", render_markdown(facts, "", ""))
+        self.assertIn(f"Numbers from: {esc(label)}", render_html(facts, "", "", esc))
+
 class ClaudeBudgetRows(HomeTestCase):
     def _runner(self, **changes):
         import dataclasses

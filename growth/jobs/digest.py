@@ -34,8 +34,8 @@ SYSTEM = (
 PROMPT = """Write the narrative part of this week's growth digest in {language}, as Markdown.
 
 For each project: one short paragraph on what ran and what failed or was blocked, one on traffic and
-sign-ups against the goal (say plainly if the goal is behind plan), then exactly three recommended
-changes, each tied to a number from the facts. Mention Reddit drafts waiting, since posting them is the
+sign-ups against the goal (say plainly if the goal is behind plan, and say so if numbers_from marks the
+numbers as an estimate), then exactly three recommended changes, each tied to a number from the facts. Mention Reddit drafts waiting, since posting them is the
 owner's only manual task, and launch directories that were skipped because they need a person. No tables (the engine adds them), no greeting, no sign-off, at most 350 words.
 
 FACTS (JSON):

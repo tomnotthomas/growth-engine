@@ -98,7 +98,8 @@ def _project(p: dict[str, Any], esc: Callable[[Any], str]) -> str:
         stat = "".join(f'<div><dt>{esc(label)}</dt><dd class="num">{esc(value)}</dd></div>' for label, value in rows)
         tone = "ok" if goal.get("on_track") else "warn"
         zone = f' in {esc(goal["zone"])}' if goal.get("zone") else ""
-        parts.append(f'<h3>{esc(goal["name"]).capitalize()}{zone}</h3><p class="status {tone}">{esc(goal.get("status", ""))}</p><dl class="stats">{stat}</dl>')
+        source = f'<p class="status">Numbers from: {esc(goal["numbers_from"])}</p>' if goal.get("numbers_from") else ""
+        parts.append(f'<h3>{esc(goal["name"]).capitalize()}{zone}</h3><p class="status {tone}">{esc(goal.get("status", ""))}</p>{source}<dl class="stats">{stat}</dl>')
         if goal.get("series"):
             body = "".join(
                 f'<tr><td>{esc(r["date"])}</td><td class="num">{esc(r["confirmed"])}</td><td class="num">{esc(r["cumulative"])}</td><td class="num">{esc(r["plan"])}</td></tr>'

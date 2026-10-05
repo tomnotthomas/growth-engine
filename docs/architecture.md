@@ -114,8 +114,10 @@ Analytics, when `[analytics] provider = "posthog"`: the page script sends a shor
 every property not on its list and relays them to PostHog without IP, cookies or a person profile.
 The Worker adds the server-side events (sign-up, confirmed, referral joined), each under a fresh random
 id and tagged with the country stored at sign-up; D1 keeps no analytics id, so no address can be
-joined to a visitor's page events. The digest reads PostHog (only this project's `site`)
-with the personal key from the environment and falls back to the Worker stats, then the local ledger.
+joined to a visitor's page events. The digest's goal numbers come from the waitlist ledger (the Worker
+stats); PostHog (only this project's `site`, with the personal key from the environment) feeds the
+traffic and funnel sections. Only when the ledger is not reachable does the digest use PostHog's
+confirmed events for the goal, labelled as an estimate.
 
 ## The digest's goal tracker
 

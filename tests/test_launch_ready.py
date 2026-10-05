@@ -119,34 +119,43 @@ class Zone(unittest.TestCase):
 
 
 class StatsSource(HomeTestCase):
-    def test_posthog_first_then_the_ledger(self) -> None:
-        engine = self.engine()
-        project = engine.projects["example"]
+    def _posthog_project(self):
+        project = self.engine().projects["example"]
         project.analytics = {"provider": "posthog", "host": "https://eu.posthog.example", "project_id": "1", "api_key_env": "PH_KEY"}
+        return project
+
+    def test_the_ledger_gives_the_goal_numbers_whatever_posthog_counts(self) -> None:
+        project = self._posthog_project()
+        ledger = {"totals": {"confirmed": 5}, "days": [], "sources": [], "cohorts": []}
+        for posthog_count in (2, 9):
+            rows = [["2026-10-04", "player", "DE", "search", posthog_count, 0]]
+            with mock.patch.dict(os.environ, {"PH_KEY": "phx_test"}), mock.patch.object(analytics, "_hogql", return_value=rows), mock.patch.object(
+                analytics, "waitlist_stats", return_value=(dict(ledger), "")
+            ):
+                stats, why = analytics.signup_stats(project)
+            self.assertEqual(why, "")
+            self.assertEqual(stats["source_of_numbers"], "waitlist ledger")
+            self.assertEqual(stats["totals"]["confirmed"], 5)
+
+    def test_posthog_is_an_estimate_when_the_ledger_is_not_reachable(self) -> None:
+        project = self._posthog_project()
         rows = [["2026-10-04", "player", "DE", "search", 4, 1]]
         with mock.patch.dict(os.environ, {"PH_KEY": "phx_test"}), mock.patch.object(analytics, "_hogql", return_value=rows), mock.patch.object(
-            analytics, "waitlist_stats", return_value=(None, "no worker")
+            analytics, "waitlist_stats", return_value=(None, "waitlist stats unreachable: timeout")
         ):
             stats, why = analytics.signup_stats(project)
         self.assertEqual(why, "")
-        self.assertEqual(stats["source_of_numbers"], "PostHog")
+        self.assertEqual(stats["source_of_numbers"], "PostHog (estimate: waitlist ledger not reachable)")
         self.assertEqual(stats["days"][0]["confirmed"], 4)
-        ledger = {"totals": {"confirmed": 1}, "days": [], "sources": [], "cohorts": []}
-        with mock.patch.object(analytics, "waitlist_stats", return_value=(ledger, "")):
-            stats, _ = analytics.signup_stats(project)  # no PostHog key in the environment
-        self.assertEqual(stats["source_of_numbers"], "waitlist ledger")
+        report = goal_report(stats, {"target": 100, "days": 46}, date(2026, 10, 5))
+        self.assertEqual(report["numbers_from"], "PostHog (estimate: waitlist ledger not reachable)")
 
-    def test_the_ledger_wins_when_posthog_counts_fewer_confirmations(self) -> None:
+    def test_neither_source_reports_why(self) -> None:
         project = self.engine().projects["example"]
-        project.analytics = {"provider": "posthog", "host": "https://eu.posthog.example", "project_id": "1", "api_key_env": "PH_KEY"}
-        rows = [["2026-10-04", "player", "DE", "search", 2, 0]]
-        ledger = {"totals": {"confirmed": 5}, "days": [], "sources": [], "cohorts": []}
-        with mock.patch.dict(os.environ, {"PH_KEY": "phx_test"}), mock.patch.object(analytics, "_hogql", return_value=rows), mock.patch.object(
-            analytics, "waitlist_stats", return_value=(ledger, "")
-        ):
-            stats, _ = analytics.signup_stats(project)
-        self.assertEqual(stats["source_of_numbers"], "waitlist ledger")
-        self.assertEqual(stats["totals"]["confirmed"], 5)
+        with mock.patch.object(analytics, "waitlist_stats", return_value=(None, "no worker")):
+            stats, why = analytics.signup_stats(project)
+        self.assertIsNone(stats)
+        self.assertEqual(why, "no worker")
 
     def test_posthog_query_is_scoped_to_the_site(self) -> None:
         project = self.engine().projects["example"]
@@ -164,15 +173,13 @@ class StatsSource(HomeTestCase):
         self.assertIn("properties.site = 'example'", sent[0])
         self.assertIn(f"LIMIT {analytics.SIGNUP_ROWS}", sent[0])
 
-    def test_posthog_rows_at_the_limit_fall_back_to_the_ledger(self) -> None:
-        project = self.engine().projects["example"]
-        project.analytics = {"provider": "posthog", "host": "https://eu.posthog.example", "project_id": "1", "api_key_env": "PH_KEY"}
+    def test_posthog_rows_at_the_limit_are_not_used(self) -> None:
+        project = self._posthog_project()
         rows = [["2026-10-04", "player", "DE", "search", 1, 0]] * analytics.SIGNUP_ROWS
-        ledger = {"totals": {"confirmed": 7}, "days": [], "sources": [], "cohorts": []}
         with mock.patch.dict(os.environ, {"PH_KEY": "phx_test"}), mock.patch.object(analytics, "_hogql", return_value=rows), mock.patch.object(
-            analytics, "waitlist_stats", return_value=(ledger, "")
+            analytics, "waitlist_stats", return_value=(None, "no worker")
         ):
             stats, why = analytics.signup_stats(project)
-        self.assertEqual(why, "")
-        self.assertEqual(stats["source_of_numbers"], "waitlist ledger")
-        self.assertEqual(stats["totals"]["confirmed"], 7)
+        self.assertIsNone(stats)
+        self.assertIn("the limit", why)
+        self.assertIn("no worker", why)
