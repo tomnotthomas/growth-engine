@@ -1,0 +1,5 @@
+[
+  {"id": 1, "name": "Tapeworm Delay", "image": "https://cdn.vendor.example/art/tapeworm.jpg"},
+  {"id": 2, "name": "Glasshouse Reverb", "image": "https://cdn.vendor.example/art/glasshouse.jpg"},
+  {"id": 3, "name": "Mothwing Synth"}
+]

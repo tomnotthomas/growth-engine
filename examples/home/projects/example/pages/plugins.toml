@@ -1,0 +1,24 @@
+id = "plugins"
+kind = "hub"
+
+[langs.en]
+path = "/plugins/"
+title = "Audio Plugins That Run in the Browser | {brand}"
+description = "Every plugin that runs on {brand}, checked every day."
+crumbs = [{ text = "{brand}", href = "page:landing" }, { text = "Plugins" }]
+
+[[langs.en.sections]]
+type = "intro"
+h1 = "Audio plugins in the browser"
+lead = ["Only what really runs."]
+
+[[langs.en.sections]]
+type = "listing"
+collection = "plugins"
+groups = [
+  { source = "playable", h2 = "Runs on {brand}", empty = "Being checked." },
+  { source = "free", h2 = "Free", empty = "None right now." },
+  { source = "new", h2 = "New", empty = "Nothing new this fortnight." },
+  { source = "blocked", h2 = "Doesn't run, and why", empty = "" },
+  { source = "native", h2 = "Already runs everywhere", empty = "" },
+]

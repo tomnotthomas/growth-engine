@@ -1,0 +1,22 @@
+id = "guide"
+kind = "guide"
+updated = "2026-10-01"
+
+[langs.en]
+path = "/guide/"
+title = "Windows Audio Plugins on a Mac: Three Ways | {brand}"
+description = "Three ways to use Windows plugins on a Mac, and which one suits whom."
+
+[[langs.en.sections]]
+type = "intro"
+h1 = "Windows audio plugins on a Mac"
+lead = ["Three ways, compared."]
+
+[[langs.en.sections]]
+type = "article"
+h2 = "The three ways"
+body = [
+  { p = "Each way has a cost." },
+  { table = { head = ["Way", "Cost"], highlight = 1, rows = [["Bridge app", "a licence"], ["{brand}", "free during the beta"]] } },
+  { button = { text = "Join the beta", href = "page:landing#beta" } },
+]

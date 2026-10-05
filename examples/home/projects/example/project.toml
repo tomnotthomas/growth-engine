@@ -1,0 +1,108 @@
+# A fictional product, so the public repository carries no real project data. Kiln runs desktop
+# audio plugins in the browser; its site has a landing page, a plugin hub, one page per plugin, a
+# guide and a waitlist. Copy this folder into your private engine home to start a real project.
+
+id = "example"
+name = "Kiln"
+enabled = true
+timezone = "Europe/Berlin"
+languages = ["en", "de"]
+default_language = "en"
+
+[brand]
+name = "Kiln"
+wordmark = "KILN"
+app_url = "https://app.kiln.example/"
+
+[site]
+base_url = "https://kiln.example"
+domain_decided = false
+indexable = false
+legal_notice = ""
+privacy = ""
+home = "landing"
+host_home = "landing"
+pages = "pages"
+ui = "ui.toml"
+keywords = "keywords.toml"
+measurements = "data/measurements.toml"
+media = "media.toml"
+media_dir = "media"
+share_image = "img/share-card.svg"
+theme = "theme"
+theme_css = ["css/tokens.css"]
+theme_color = "#121212"
+forbid_chars = ["—"]
+out = "example"
+
+[rules]
+footage_publishers = ["Kiln Audio"]
+
+[channels.website]
+enabled = true
+
+[data.plugins_live]
+kind = "file-json"
+path = "data/live.json"
+id_field = "id"
+keep_fields = ["id", "name"]
+max_age = "3d"
+
+[collections.plugins]
+curated = "data/plugins.toml"
+source = "plugins_live"
+hub = "plugins"
+match_live = "id"
+match_curated = "id"
+require_live = true
+min_searches = 30
+max_wave = 1
+
+[waitlist]
+status_page = "waitlist"
+worker_name = "kiln-site"
+database_name = "kiln-waitlist"
+email_provider = "log"
+email_from = "Kiln <beta@kiln.example>"
+move_up_per_referral = 5
+counter_min = 50
+stats_token_env = "KILN_STATS_TOKEN"
+
+[goal]
+name = "confirmed sign-ups"
+target = 5000
+days = 46
+start = ""
+
+[jobs.fetch-data]
+kind = "fetch-data"
+schedule = "every 6h"
+
+[jobs.build-site]
+kind = "build-site"
+schedule = "daily 04:00"
+
+[directories]
+source = "directories/list.md"           # a real project uses the default upstream list
+audience_terms = ["audio", "plugin"]
+regions = ["de"]
+fact_sheet = "directories/facts.md"
+voice = "plain, friendly, concrete"
+draft_batch = 25
+submit = "directories/submit.toml"
+launch_date = ""                          # defaults to [goal] start
+
+[channels.directory-submit]
+enabled = true
+
+[jobs.directories-sync]
+kind = "directories-sync"
+schedule = "weekly sun 03:00"
+
+[jobs.directories-draft]
+kind = "directories-draft"
+schedule = "weekly sun 03:30"
+
+[jobs.directories-submit]
+kind = "directories-submit"
+schedule = "daily 09:00"

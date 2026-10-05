@@ -1,0 +1,20 @@
+id = "waitlist"
+kind = "waitlist"
+noindex = true
+sitemap = false
+
+[langs.en]
+path = "/waitlist/"
+title = "Your waitlist spot | {brand}"
+description = "Your spot and your invite link."
+
+[[langs.en.sections]]
+type = "waitlist-status"
+
+[langs.de]
+path = "/de/warteliste/"
+title = "Deine Warteliste | {brand}"
+description = "Dein Platz und dein Einladungslink."
+
+[[langs.de.sections]]
+type = "waitlist-status"
