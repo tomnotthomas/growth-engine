@@ -58,7 +58,6 @@ def add_draft(
     known = CHANNELS.get(channel)
     if known is None or known.level != HUMAN_QUEUE:
         raise QueueRefused(f"{channel} has no human queue; it either runs on its own or not at all")
-    check_action(Action(channel=channel, kind="draft", community=community, text=text, url=thread_url), rules, store.text_communities)
     draft = Draft(
         id=sha256(thread_url + text)[:12],
         channel=channel,
@@ -70,8 +69,11 @@ def add_draft(
         created_at=iso(now),
     )
     folder = queue_dir(state_dir, project_id, channel)
-    write_json(folder / f"{draft.id}.json", draft.__dict__)
-    store.record_text(fingerprint(text), community, project_id, channel)
+    # Check, write and record in one transaction, so two processes can't both queue the same text.
+    with store.tx():
+        check_action(Action(channel=channel, kind="draft", community=community, text=text, url=thread_url), rules, store.text_communities)
+        write_json(folder / f"{draft.id}.json", draft.__dict__)
+        store.record_text(fingerprint(text), community, project_id, channel)
     return draft
 
 

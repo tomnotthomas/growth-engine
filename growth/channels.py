@@ -92,7 +92,7 @@ CHANNELS: dict[str, Channel] = {
             "waitlist-email",
             "Waitlist, referral and milestone emails (double opt-in only)",
             NEEDS_APPROVAL,
-            "Needs the own domain, a sender (Resend or PostHog Workflows) and a consent log first.",
+            "Needs the own domain, a sender (Brevo or Resend) and the consent log first.",
         ),
         Channel(
             "directory-submit",

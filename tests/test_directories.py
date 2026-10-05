@@ -224,3 +224,17 @@ class Pipeline(HomeTestCase):
         self.assertEqual(entry["status"], "skipped")
         self.assertEqual(entry["submitted_at"], "")
         self.assertIn("never reported back", entry["note"])
+
+    def test_missing_project_config_sends_nothing_and_is_retried(self) -> None:
+        engine = self.launched()
+        base_url = engine.projects["example"].site.pop("base_url")
+        with mock.patch("growth.jobs.directories.net.request", return_value=(200, b"")) as request:
+            run_now(engine, "example", "directories-submit", now=NOW + timedelta(hours=8))
+            request.assert_not_called()
+            entry = self.catalogue(engine)["betahunt.example/submit"]
+            self.assertEqual(entry["status"], "skipped")
+            self.assertIn("base_url", entry["note"])
+            engine.projects["example"].site["base_url"] = base_url
+            run_now(engine, "example", "directories-submit", now=NOW + timedelta(hours=9))
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(self.catalogue(engine)["betahunt.example/submit"]["status"], "submitted")

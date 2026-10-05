@@ -3,13 +3,16 @@ plus the channel registry's rule that Reddit drafts are the only human queue."""
 
 from __future__ import annotations
 
+import http.server
 import re
+import threading
 import unittest
 from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 
 from growth import channels as ch
+from growth import net
 from growth.policy import (
     NEVER_AUTOMATE,
     Action,
@@ -163,10 +166,10 @@ class ChannelRegistry(unittest.TestCase):
         for off in ("forums", "comment-replies", "google-indexing-api", "outreach-email", "paid-ads"):
             self.assertEqual(ch.CHANNELS[off].level, ch.OFF, off)
 
-    def test_docs_list_every_channel_with_its_level(self) -> None:
+    def test_docs_list_every_channel_as_the_registry_does(self) -> None:
         doc = (REPO / "docs" / "channels.md").read_text(encoding="utf-8")
-        rows = dict(re.findall(r"^\| `([a-z-]+)` \| ([a-z-]+) \|", doc, re.M))
-        self.assertEqual(rows, {c.id: c.level for c in ch.CHANNELS.values()})
+        rows = {cid: (level, label, why) for cid, level, label, why in re.findall(r"^\| `([a-z-]+)` \| ([a-z-]+) \| (.*?) \| (.*?) \|$", doc, re.M)}
+        self.assertEqual(rows, {c.id: (c.level, c.label, c.why) for c in ch.CHANNELS.values()})
 
 
 class HumanQueue(HomeTestCase):
@@ -183,3 +186,42 @@ class HumanQueue(HomeTestCase):
         drafts = open_drafts(engine.state_dir, "example")
         self.assertEqual([d.community for d in drafts], ["r/macgaming"])
         self.assertTrue(store.blocks_since(NOW - timedelta(days=1)) == [])  # queue refusals are not job blocks
+
+
+class _Redirects(http.server.BaseHTTPRequestHandler):
+    """/to-google redirects to the Indexing API; /to-ok redirects to /ok, which answers 200."""
+
+    def do_GET(self) -> None:  # noqa: N802
+        targets = {"/to-google": "https://indexing.googleapis.com/v3/urlNotifications:publish", "/to-ok": "/ok"}
+        if self.path in targets:
+            self.send_response(302)
+            self.send_header("Location", targets[self.path])
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *args) -> None:  # noqa: ANN002
+        pass
+
+
+class RedirectPolicy(unittest.TestCase):
+    def setUp(self) -> None:
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), _Redirects)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.base = f"http://127.0.0.1:{self.server.server_port}"
+
+    def tearDown(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+    def test_a_redirect_target_passes_the_url_policy(self) -> None:
+        self.assertEqual(net.request("GET", self.base + "/to-ok"), (200, b"ok"))
+        with self.assertRaises(PolicyViolation):
+            net.request("GET", self.base + "/to-google")
+
+    def test_a_keyed_request_never_follows_a_redirect(self) -> None:
+        with self.assertRaises(net.HttpError) as caught:
+            net.request("GET", self.base + "/to-ok", headers={"Authorization": "Bearer secret"})
+        self.assertIn("302", str(caught.exception))

@@ -55,10 +55,16 @@ def main(argv: list[str] | None = None) -> int:
         return _check(engine)
     if args.command == "status":
         return _status(engine)
+    project = None
+    if args.command in ("queue", "build"):
+        project = engine.projects.get(args.project)
+        if project is None:
+            known = ", ".join(sorted(engine.projects)) or "none"
+            print(f"unknown or disabled project {args.project!r} (enabled: {known})", file=sys.stderr)
+            return 1
     if args.command == "queue":
         from .queue import write_queue_page
 
-        project = engine.projects[args.project]
         print(write_queue_page(engine.state_dir, project.id, project.name, esc))
         return 0
     try:
@@ -71,8 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             status = run_now(engine, args.scope, args.job)
             print(status)
             return 0 if status in ("ok", "already ran") else 1
-        if args.command == "build":
-            project = engine.projects[args.project]
+        if args.command == "build" and project is not None:
             for job in ("fetch-data", "build-site"):
                 matches = [j.id for j in project.jobs.values() if j.kind == job and j.enabled]
                 for jid in matches:

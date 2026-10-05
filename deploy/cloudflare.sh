@@ -41,11 +41,21 @@ if grep -q 'database_id = "SET-BY-deploy/cloudflare.sh"' wrangler.toml; then
 import re, sys
 path, db_id = sys.argv[1], sys.argv[2]
 text = open(path, encoding="utf-8").read()
-text = re.sub(r'^d1_database_id = ".*?"', f'd1_database_id = "{db_id}"', text, count=1, flags=re.M)
+line = f'd1_database_id = "{db_id}"'
+if re.search(r'^d1_database_id\s*=', text, flags=re.M):
+    text = re.sub(r'^d1_database_id\s*=.*$', line, text, count=1, flags=re.M)
+elif re.search(r'^\[waitlist\]\s*$', text, flags=re.M):
+    text = re.sub(r'^\[waitlist\]\s*$', "[waitlist]\n" + line, text, count=1, flags=re.M)
+else:
+    sys.exit(f"{path} has no [waitlist] table; add one before deploying")
 open(path, "w", encoding="utf-8").write(text)
 PY
   echo "Recorded D1 database $ID in projects/$PROJECT/project.toml; rebuilding."
   cd "$REPO" && python3 -m growth --home "$HOME_DIR" build "$PROJECT" && cd "$OUT"
+  if grep -q 'SET-BY-deploy/cloudflare.sh' wrangler.toml; then
+    echo "wrangler.toml still has no D1 database id after the rebuild; check [waitlist] d1_database_id" >&2
+    exit 1
+  fi
 fi
 
 $WRANGLER d1 execute "$DB_NAME" --remote --file schema.sql

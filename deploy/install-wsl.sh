@@ -22,10 +22,16 @@ fi
 
 mkdir -p "$HOME/.config/growth-engine" "$HOME/.config/systemd/user"
 umask 077
+# Rewrite only the two managed lines; secrets the operator added stay in place on every rerun.
+ENV_FILE="$HOME/.config/growth-engine/env"
+touch "$ENV_FILE"
 {
+  grep -v -e '^GROWTH_HOME=' -e '^PATH=' "$ENV_FILE" || true
   echo "GROWTH_HOME=$HOME_DIR"
   echo "PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
-} > "$HOME/.config/growth-engine/env"
+} > "$ENV_FILE.new"
+chmod 600 "$ENV_FILE.new"
+mv "$ENV_FILE.new" "$ENV_FILE"
 echo "Put secrets (GROWTH_DIGEST_WEBHOOK, <PROJECT>_STATS_TOKEN, PostHog keys) into ~/.config/growth-engine/env, never into the repo."
 
 cp "$REPO/deploy/systemd/growth-engine.service" "$REPO/deploy/systemd/growth-engine.timer" "$HOME/.config/systemd/user/"

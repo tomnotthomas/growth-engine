@@ -24,6 +24,14 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+class _CheckedRedirect(urllib.request.HTTPRedirectHandler):
+    """Follows a redirect only to a URL the policy allows, the same check as the first request."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        check_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def origin(url: str) -> str:
     parts = urllib.parse.urlsplit(url)
     return f"{parts.scheme}://{parts.hostname or ''}"
@@ -47,7 +55,10 @@ def request(
         data = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
         sent["Content-Type"] = "application/json; charset=utf-8"
     sent.update(headers or {})
-    opener = urllib.request.build_opener() if follow_redirects else urllib.request.build_opener(_NoRedirect)
+    # urllib keeps the Authorization header on a redirect, so a keyed request never follows one.
+    if any(k.lower() == "authorization" for k in sent):
+        follow_redirects = False
+    opener = urllib.request.build_opener(_CheckedRedirect if follow_redirects else _NoRedirect)
     last: Exception | None = None
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, data=data, method=method, headers=sent)

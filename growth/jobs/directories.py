@@ -124,6 +124,11 @@ def _submit_one(ctx: Any, entry: Entry, site: dict[str, Any] | None) -> str:
     problem = _site_problem(site, entry)
     if problem:
         return _mark(entry, "skipped", f"verified-submit entry unusable: {problem}")
+    try:
+        fields = _fields(ctx.project, site, entry)
+    except KeyError as exc:
+        # Nothing was sent, so the entry stays open for the next run once the config is fixed.
+        return _mark(entry, "skipped", f"project config is missing {exc.args[0]}; nothing sent")
     action = Action(
         channel="directory-submit",
         kind="submit",
@@ -132,7 +137,7 @@ def _submit_one(ctx: Any, entry: Entry, site: dict[str, Any] | None) -> str:
         meta={k: site.get(k) for k in ("terms_allow_automation", "terms_url", "terms_checked", "captcha", "account", "method")},
     )
     try:
-        state = ctx.act(action, f"directory:{entry.id}", lambda: _post(ctx, site, entry), retry_failed=False)
+        state = ctx.act(action, f"directory:{entry.id}", lambda: _post(site, entry, fields), retry_failed=False)
     except PolicyViolation as exc:
         return _mark(entry, "skipped", f"refused: {exc}")
     except Exception as exc:
@@ -164,15 +169,19 @@ def _site_problem(site: dict[str, Any], entry: Entry) -> str:
     return ""
 
 
-def _post(ctx: Any, site: dict[str, Any], entry: Entry) -> str:
-    project = ctx.project
+def _fields(project: Any, site: dict[str, Any], entry: Entry) -> dict[str, str]:
+    """The form or API fields with the project's values filled in; raises KeyError for missing config."""
     values = {
         "brand": project.brand["name"],
         "base_url": project.site["base_url"],
         "tagline": entry.listing.get("tagline", ""),
         "description": entry.listing.get("description", ""),
     }
-    fields = {k: re.sub(r"\{(\w+)\}", lambda m: str(values.get(m.group(1), m.group(0))), str(v)) for k, v in site["fields"].items()}
+    return {k: re.sub(r"\{(\w+)\}", lambda m: str(values.get(m.group(1), m.group(0))), str(v)) for k, v in site["fields"].items()}
+
+
+def _post(site: dict[str, Any], entry: Entry, fields: dict[str, str]) -> str:
+    """Send one submission; only errors from here on count as an attempt."""
     if site["method"] == "api":
         status, _ = net.request("POST", site["endpoint"], body=fields, timeout=30, follow_redirects=False)
     else:

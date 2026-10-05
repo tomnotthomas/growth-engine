@@ -3,6 +3,8 @@ interrupted side effects are never repeated, and AI jobs stay inside the budget.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import multiprocessing
 import os
 import threading
@@ -383,6 +385,14 @@ class Outcomes(HomeTestCase):
         self.assertTrue(any(line.startswith("failed example/fetch-data") for line in report.lines()))
         with mock.patch("growth.cli.tick", return_value=report), mock.patch("builtins.print"):
             self.assertEqual(main(["--home", str(self.home), "tick"]), 1)
+
+    def test_an_unknown_project_is_a_clear_error_not_a_traceback(self) -> None:
+        for command in ("queue", "build"):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                self.assertEqual(main(["--home", str(self.home), command, "nope"]), 1)
+            self.assertIn("unknown or disabled project 'nope'", err.getvalue())
+            self.assertIn("example", err.getvalue())
 
     def test_a_job_without_ai_budget_is_deferred_and_its_slot_stays_due(self) -> None:
         self._kind("fetch-data", target="tests.test_scheduler:no_ai_job", idempotent=False)
