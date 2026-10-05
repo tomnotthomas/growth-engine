@@ -70,8 +70,9 @@ are `{brand}`, `{app_url}`, `{year}`, `{move_up}`, `{checked}`, `{legal.<key>}` 
 item. A value of `"@field"` takes the item's field (for example `body = "@why"` with a `fallback`).
 
 Rules enforced at load time: every link resolves, every placeholder is known, the brand is never
-written out literally (so a rename is a one-line change), forbidden characters stay out, and each
-keyword cluster's primary words appear in its page's title or H1.
+written out literally (so a rename is a one-line change), forbidden characters stay out, every literal
+entry of a `steps`, `features`, `faq` (`items` and `fallback`) or `spec` list has its section's keys in
+every language, live or not, and each keyword cluster's primary words appear in its page's title or H1.
 
 Rules enforced at build time:
 
@@ -117,7 +118,7 @@ id and tagged with the country stored at sign-up; D1 keeps no analytics id, so n
 joined to a visitor's page events. The digest's goal numbers come from the waitlist ledger (the Worker
 stats); PostHog (only this project's `site`, with the personal key from the environment) feeds the
 traffic and funnel sections. Only when the ledger is not reachable does the digest use PostHog's
-confirmed events for the goal, labelled as an estimate.
+confirmed events of the last 365 days for the goal, labelled as an estimate.
 
 ## The digest's goal tracker
 
