@@ -3,6 +3,16 @@
 The engine is plain Python 3.11+ with no dependencies, plus Claude Code for the AI jobs. These steps
 assume Ubuntu on WSL on a Windows 11 PC that is always on. Native Ubuntu skips step 4.
 
+## In one command
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tomnotthomas/growth-engine/main/deploy/bootstrap.sh | bash -s -- <home-source>
+```
+
+`<home-source>` is the private home: a local folder or an rsync source like `user@laptop:/path/to/home`.
+The script clones or updates the code, copies the home to `~/growth-home` (without `state/` and
+`dist/`) and runs the scheduler install below. The steps it automates:
+
 ## 1. Code and private home
 
 ```sh
