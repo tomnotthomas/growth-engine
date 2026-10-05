@@ -112,7 +112,9 @@ row and recounts the inviter's credited invites. `/api/waitlist/stats` (Bearer `
 Analytics, when `[analytics] provider = "posthog"`: the page script sends a short list of events
 (page view, form view, submit, referral sent, game search) to the Worker's `/api/e`, which drops
 every property not on its list and relays them to PostHog without IP, cookies or a person profile.
-The Worker adds the server-side events (sign-up, confirmed, referral joined). The digest reads PostHog
+The Worker adds the server-side events (sign-up, confirmed, referral joined), each under a fresh random
+id and tagged with the country stored at sign-up; D1 keeps no analytics id, so no address can be
+joined to a visitor's page events. The digest reads PostHog (only this project's `site`)
 with the personal key from the environment and falls back to the Worker stats, then the local ledger.
 
 ## The digest's goal tracker
