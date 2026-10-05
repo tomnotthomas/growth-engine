@@ -50,9 +50,9 @@ are `indexnow:<path>:<content hash>`; the digest webhook key is the digest's dat
 | `build-site` | project | no | yes | Builds `dist/<out>/` and swaps it in atomically; a failed build leaves the old site untouched. |
 | `indexnow` | project | no | no | Pings IndexNow for indexable pages whose content hash changed; needs `[site] indexable`. |
 | `directories-sync` | project | no | yes | Imports the launch-directory list into `state/projects/<id>/directories.json` and scores each entry, keeping statuses and drafts. |
-| `directories-draft` | project | yes | yes | Drafts listing texts for the best-scoring undrafted sites from the project's fact sheet (one AI run per batch); refuses text with numbers the fact sheet lacks. |
+| `directories-draft` | project | required | yes | Drafts listing texts for the best-scoring undrafted sites from the project's fact sheet (one AI run per batch); refuses text with numbers the fact sheet lacks. |
 | `directories-submit` | project | no | no | From launch day on: submits once to each verified API or plain-form site through the side-effect ledger; marks the rest skipped. |
-| `digest` | engine | yes | no | Collects facts, has Claude write the narrative, checks its numbers, writes `state/engine/digests/<date>.md` and `.html`, and optionally POSTs to a webhook. |
+| `digest` | engine | optional | no | Collects facts, has Claude write the narrative (without AI budget it goes out on time with the facts alone), checks its numbers, writes `state/engine/digests/<date>.md` and `.html`, and optionally POSTs to a webhook. |
 
 ## The site generator
 
@@ -101,7 +101,7 @@ SHA-256 hashes of the confirm and status tokens are stored. A confirmed user get
 confirmed invite, capped at `max_credited_referrals`. The live counter shows only real numbers, and
 only from `counter_min` on. Abuse limits: a honeypot field, `signups_per_ip_hour` per hashed IP, and at
 most one mail a day to an existing address. Every mail carries a one-click leave link that deletes the
-row. `/api/waitlist/stats` (Bearer `STATS_TOKEN`) feeds the digest.
+row and recounts the inviter's credited invites. `/api/waitlist/stats` (Bearer `STATS_TOKEN`) feeds the digest.
 
 ## The digest's goal tracker
 
