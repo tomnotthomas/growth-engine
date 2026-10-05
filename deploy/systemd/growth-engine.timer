@@ -1,0 +1,13 @@
+# Every 5 minutes. Persistent=true fires a missed tick right after boot; the engine's own ledger then
+# decides which slots to catch up and guarantees none runs twice.
+[Unit]
+Description=growth-engine scheduler tick
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
