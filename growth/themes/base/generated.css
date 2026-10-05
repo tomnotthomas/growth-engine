@@ -230,7 +230,7 @@
 /* ---------- Neutral hero art: the Mac's screen as the only light in the room ----------
    No game art: a 16:10 display seen in the dark, measured like the titles are drafted. */
 .hero {
-  min-height: min(100dvh, 920px);
+  min-height: min(84dvh, 820px);
 }
 .hero-art {
   position: absolute;
@@ -247,9 +247,10 @@
   position: absolute;
   right: clamp(-160px, -6vw, -40px);
   top: calc(var(--nav) + 6vh);
-  width: min(74vw, 1180px);
+  width: min(62vw, 980px);
   aspect-ratio: 16 / 10;
-  border: 1px solid rgb(239 239 237 / 0.22);
+  opacity: 0.7;
+  border: 1px solid rgb(239 239 237 / 0.18);
   border-radius: 18px;
   background:
     linear-gradient(160deg, rgb(239 239 237 / 0.1), rgb(239 239 237 / 0.015) 46%, transparent 70%),
@@ -264,7 +265,7 @@
   position: absolute;
   right: clamp(-160px, -6vw, -40px);
   top: calc(var(--nav) + 6vh - 22px);
-  width: min(74vw, 1180px);
+  width: min(62vw, 980px);
   height: 9px;
   border-left: 1px solid rgb(239 239 237 / 0.35);
   border-right: 1px solid rgb(239 239 237 / 0.35);
@@ -601,17 +602,216 @@
 }
 
 /* ---------- Footer: legal links that wait for the Impressum ---------- */
-.foot .todo {
-  color: var(--ink-3);
-  text-decoration: line-through;
+.foot-guides {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  font-size: 14px;
+}
+.foot-guides a {
+  color: var(--ink-2);
+  text-underline-offset: 4px;
   text-decoration-color: var(--line-2);
+}
+.foot-guides a:hover {
+  color: var(--ink);
+  text-decoration-color: var(--accent-edge);
+}
+
+/* ---------- Navigation on pages with one language: keep the button at the right edge ---------- */
+@media (max-width: 860px) {
+  .nav .nav-cta {
+    margin-left: auto;
+  }
+  .nav .lang + .nav-cta {
+    margin-left: 0;
+  }
+}
+
+/* ---------- Small text buttons inside copy (typo fix, "wrong address?") ---------- */
+.linkish {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-edge);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.on-paper .linkish,
+.close .linkish {
+  text-decoration-color: var(--accent-deep);
+}
+
+/* ---------- Invite note above the form ---------- */
+.wl-ref {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  font: 500 15px/1.4 var(--f);
+}
+.wl-ref::before {
+  content: "";
+  width: 18px;
+  height: 3px;
+  background: var(--accent-deep);
+  flex: none;
+}
+
+/* ---------- Game search ---------- */
+.search h2 + p {
+  margin-top: 14px;
+  color: var(--ink-2);
+}
+.search .search-input {
+  width: 100%;
+  max-width: 560px;
+  height: 52px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  padding: 0 22px;
+  font: 400 17px/1 var(--f);
+}
+.search .search-input:focus-visible {
+  outline: none;
+  border-color: var(--accent-edge);
+  box-shadow: 0 0 0 1px var(--accent-edge);
+}
+.search-results {
+  list-style: none;
+  margin: 18px 0 0;
+  padding: 0;
+  max-width: 640px;
+}
+.search-results:empty {
+  display: none;
+}
+.search-results .hit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.search-results .name {
+  font: 500 18px/1.3 var(--f);
+  color: var(--ink);
+}
+.search-results a.name {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 4px;
+}
+.search-results .status {
+  font: 400 12px/1.6 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-2);
+}
+.search-results .runs .status::before,
+.search-results .blocked .status::before,
+.search-results .native .status::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: 1px;
+}
+.search-results .runs .status::before {
+  background: #5f9e1f;
+}
+.search-results .blocked .status::before {
+  background: #b5442f;
+}
+.search-results .native .status::before {
+  background: var(--ink-3);
+}
+.search-results .meta {
+  grid-column: 1 / -1;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.search-miss {
+  margin-top: 22px;
+  padding: clamp(20px, 2.4vw, 28px);
+  max-width: 640px;
+}
+.search-miss-h {
+  font: 500 18px/1.35 var(--f);
+  margin-bottom: 16px;
+}
+
+/* ---------- Waitlist status page: the form under the message ---------- */
+.wl-status-form {
+  max-width: 560px;
+  margin-top: 8px;
+}
+.wl-status-form[hidden] {
+  display: none;
 }
 
 /* ---------- Single-purpose pages (404, confirm, leave) ---------- */
 .page-404 main,
 .page-action main {
   min-height: 70dvh;
+  align-content: start;
 }
 .page-action form {
   margin-top: 24px;
 }
+.page-action .nav {
+  position: static;
+}
+.page-action main.intro {
+  padding-top: clamp(48px, 6vw, 88px);
+}
+.action-button {
+  justify-content: center;
+  padding: 6px 28px;
+}
+
+/* A proof section with measured numbers but no recording yet: one column, no empty video slot. */
+.proof.numbers-only {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 920px;
+}
+
+/* ---------- Hardware check: one drafted line under the host hero ----------
+   A hairline strip on the hero's black, like a note on the drawing. The mark is the only colour,
+   and only when the card fits. */
+.hw-check {
+  position: relative;
+  z-index: 2;
+  background: #0d0d0d;
+  border-top: 1px solid var(--line);
+  padding: 18px var(--gut);
+}
+.hw-line {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  max-width: 78ch;
+  font: 400 16px / 1.5 var(--f);
+  color: var(--ink-2);
+}
+.hw-line::before {
+  content: "";
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--ink-2);
+  transform: translateY(-1px);
+}
+.hw-fits .hw-line { color: var(--ink); }
+.hw-fits .hw-line::before { background: var(--accent); border-color: var(--accent); }

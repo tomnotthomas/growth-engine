@@ -67,6 +67,11 @@ class SiteContext:
     site_indexable: bool
     asset_version: str = ""
     media_used: set[str] = field(default_factory=set)
+    live_languages: list[str] = field(default_factory=list)
+    forms: int = 0
+
+    def live(self, lang: str) -> bool:
+        return not self.live_languages or lang in self.live_languages
 
     @property
     def base(self) -> str:
@@ -96,7 +101,7 @@ class SiteContext:
         if ref == "app:":
             return str(self.project.brand.get("app_url", "/"))
         if ref.startswith("legal:"):
-            return str(self.project.site.get(ref[6:], "") or "#")
+            return self.legal_path(ref[6:], lang)
         if ref.startswith("item:"):
             collection, _, slug = ref[5:].partition("/")
             for item in self.items.get(collection, []):
@@ -107,6 +112,15 @@ class SiteContext:
             hub = self.project.collections.get(collection, {}).get("hub")
             return self.path_of(hub, lang) if hub in self.pages else "/"
         return ref
+
+    def legal_path(self, key: str, lang: str) -> str:
+        """The legal notice or privacy page in this language: a page id, or a path for older configs."""
+        value = str(self.project.site.get(key, "") or "")
+        if value in self.pages:
+            return self.path_of(value, lang)
+        if not value:
+            raise ValueError(f"[site] {key} is not set; sign-up forms and legal links need it")
+        return value
 
     def item_page(self, item: Item) -> str | None:
         for page in self.pages.values():
@@ -139,6 +153,8 @@ class PageRenderer:
             "move_up": self.ctx.project.raw.get("waitlist", {}).get("move_up_per_referral", 5),
             "checked": long_date(self.ctx.checked, self.lang) if self.ctx.checked else "",
         }
+        values.update({f"legal.{k}": v for k, v in self.ctx.project.raw.get("legal", {}).items()})
+        values.update(self.hardware_values())
         if self.item:
             values.update(self.item.record)
             values.update(
@@ -155,6 +171,19 @@ class PageRenderer:
             return wrap(values[key])
 
         return PLACEHOLDER.sub(sub, text)
+
+    def hardware_values(self) -> dict[str, str]:
+        """{hardware.floor} and {hardware.models}: the supported hardware, named the same on every page."""
+        conf = self.ctx.project.raw.get("hardware_check", {})
+        if not conf:
+            return {}
+        floor = conf.get("floor", {})
+        floor_text = floor.get(self.lang) or floor.get(self.ctx.project.default_language, "") if isinstance(floor, dict) else str(floor)
+        models = [str(m) for m in conf.get("models", [])]
+        joiner = self.ctx.ui.get(self.lang, {}).get("list_or", "or")
+        listed = models[0] if len(models) == 1 else ", ".join(models[:-1]) + f" {joiner} " + models[-1] if models else ""
+        prefix = str(conf.get("models_prefix", ""))
+        return {"hardware.floor": floor_text, "hardware.models": (prefix + " " + listed).strip()}
 
     def field(self, value: Any) -> Any:
         """A section value; "@name" takes the item's field `name` instead."""
@@ -197,7 +226,7 @@ class PageRenderer:
         return True
 
     def alternates(self) -> dict[str, str]:
-        return {lang: self.ctx.path_of(self.page.id, lang, self.item) for lang in self.page.langs}
+        return {lang: self.ctx.path_of(self.page.id, lang, self.item) for lang in self.page.langs if self.ctx.live(lang)}
 
     def hreflang(self, indexable: bool) -> dict[str, str]:
         """The indexable language versions, plus x-default, when there is more than one."""
@@ -253,6 +282,8 @@ class PageRenderer:
         og_title = plain(self.fill(self.spec.og_title or self.spec.title))
         og_desc = plain(self.fill(self.spec.og_description or description))
         share = self.ctx.project.site.get("share_image", "")
+        if isinstance(share, dict):
+            share = share.get(self.lang) or share.get(self.ctx.project.default_language, "")
         lines = [
             '<meta charset="utf-8">',
             '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">',
@@ -327,7 +358,7 @@ class PageRenderer:
             for lang, alt in alternates.items():
                 current = ' aria-current="true"' if lang == self.lang else ""
                 buttons.append(f'<a href="{esc(alt)}" hreflang="{esc(lang)}" lang="{esc(lang)}"{current}>{esc(lang.upper())}</a>')
-            langs = f'<div class="lang" role="group" aria-label="{esc(t("lang_label"))}">{"".join(buttons)}</div>'
+            langs = f'<div class="lang" role="group" aria-label="{esc(t("lang_label"))}" data-lang-switch>{"".join(buttons)}</div>'
         cta_key = "host_cta" if self.role == "host" else "cta"
         target = "#beta" if self.has_beta else self.ctx.path_of(self.ctx.project.site.get("home", "player"), self.lang) + "#beta"
         if self.role == "host" and not self.has_beta:
@@ -336,6 +367,8 @@ class PageRenderer:
             f'<a class="lpill lpill-sm solid nav-cta" href="{esc(target)}">'
             f'<span class="long">{esc(t(cta_key))}</span><span class="short">{esc(t(cta_key + "_short"))}</span></a>'
         )
+        if self.page.kind in {"waitlist", "legal"}:
+            cta = ""  # the status page carries its own form; legal pages sell nothing
         nav_links = f'<nav class="nav-links" aria-label="{esc(t("sections_label"))}">{"".join(links)}</nav>' if links else '<span class="nav-links"></span>'
         wordmark = esc(self.ctx.project.brand.get("wordmark", self.ctx.project.brand["name"]))
         return (
@@ -356,29 +389,36 @@ class PageRenderer:
             )
         legal_links = []
         for key in ("legal_notice", "privacy"):
-            href = self.ctx.project.site.get(key, "")
-            if href:
-                legal_links.append(f'<a href="{esc(href)}">{esc(t(key))}</a>')
-            else:
-                legal_links.append(f'<span class="todo">{esc(t(key))}</span>')
+            if self.ctx.project.site.get(key):
+                legal_links.append(f'<a href="{esc(self.ctx.legal_path(key, self.lang))}">{esc(t(key))}</a>')
+        guides = []
+        for page_id in self.ctx.project.site.get("footer_links", []):
+            page = self.ctx.pages.get(page_id)
+            if page is None or self.lang not in page.langs or page_id == self.page.id:
+                continue
+            title = plain(self.fill(page.langs[self.lang].title)).split(" | ")[0]
+            guides.append(f'<li><a href="{esc(self.ctx.path_of(page_id, self.lang))}">{esc(title)}</a></li>')
+        guide_list = f'<ul class="foot-guides" aria-label="{esc(t("footer_guides"))}">{"".join(guides)}</ul>' if guides else ""
         wordmark = esc(self.ctx.project.brand.get("wordmark", self.ctx.project.brand["name"]))
         return (
             '<footer class="foot pfoot">\n'
             f'  <span class="wordmark">{wordmark}</span>\n'
-            f'  <div>{cross}<p class="foot-legal">{self.md(t("foot_legal_" + self.role))}</p></div>\n'
+            f'  <div>{cross}{guide_list}<p class="foot-legal">{self.md(t("foot_legal_" + self.role))}</p></div>\n'
             f'  <nav aria-label="{esc(t("legal_label"))}">{"".join(legal_links)}</nav>\n'
             "</footer>"
         )
 
     def scripts(self) -> str:
-        if not self.has_waitlist:
+        if not self.ctx.project.raw.get("waitlist"):
             return ""
         brand = str(self.ctx.project.brand["name"])
-        # Client strings keep their own placeholders ({n}, {url}, {move_up}); only the brand is filled here.
+        # Client strings keep their own placeholders ({n}, {url}, {move_up}, {email}); only the brand is filled here.
         strings = {k[3:]: v.replace("{brand}", brand) for k, v in self.ctx.ui.get(self.lang, {}).items() if k.startswith("js_")}
-        data = script_json(strings)
+        analytics = self.ctx.project.analytics.get("provider") == "posthog" and bool(self.ctx.project.analytics.get("project_api_key"))
+        settings = {"lang": self.lang, "page": self.page.id, "role": self.role, "analytics": analytics}
         return (
-            f'<script type="application/json" id="wl-strings">{data}</script>\n'
+            f'<script type="application/json" id="wl-strings">{script_json(strings)}</script>\n'
+            f'<script type="application/json" id="wl-settings">{script_json(settings)}</script>\n'
             f'<script src="/assets/waitlist.js{self.ctx.asset_version}" defer></script>'
         )
 
@@ -466,13 +506,15 @@ class PageRenderer:
         record = self.ctx.measurements.get(str(mid)) if mid else None
         if self.item and s["measurement"] == "@measurement":
             record = self.item.measurement
+        if not record:
+            return ""  # no empty video slot and no "value to come": the section waits for a real recording
         t = lambda key: self.ctx.text(self.lang, key)  # noqa: E731
         stats = []
         for key, label in (("resolution", "proof_res"), ("fps", "proof_fps"), ("delay_ms", "proof_delay")):
-            value = record.get(key) if record else None
-            shown = esc(t("proof_tbd")) if value is None else esc(_measure(key, value))
-            stats.append(f"<div><dt>{esc(t(label))}</dt><dd>{shown}</dd></div>")
-        clip = record.get("clip") if record else None
+            value = record.get(key)
+            if value is not None:
+                stats.append(f"<div><dt>{esc(t(label))}</dt><dd>{esc(_measure(key, value))}</dd></div>")
+        clip = record.get("clip")
         if clip:
             self.ctx.media_used.add(clip)
             poster = record.get("poster", "")
@@ -494,15 +536,12 @@ class PageRenderer:
                     )
                 )
         else:
-            media = (
-                '<span class="proof-play" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" '
-                'stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M9 6.5v11l8.5-5.5z"/></svg></span>'
-                f'<span class="proof-slot">{esc(t("proof_slot"))}</span>'
-            )
-        text = self.md(s["text"]) if (clip and s.get("text")) else self.md(s.get("text_pending", s.get("text", "")))
+            media = ""  # measured numbers without a recording: show the numbers, not an empty video slot
+        text = self.md(s["text"]) if (clip and s.get("text")) else self.md(s.get("text_measured", s.get("text_pending", s.get("text", ""))))
+        clip_box = f'  <div class="proof-clip">{media}</div>\n' if clip else ""
         return (
-            f'<section class="proof" aria-labelledby="{hid}">\n'
-            f'  <div class="proof-clip{"" if clip else " pending"}">{media}</div>\n'
+            f'<section class="proof{"" if clip else " numbers-only"}" aria-labelledby="{hid}">\n'
+            f"{clip_box}"
             f'  <div class="proof-copy"><h2 id="{hid}">{self.md(s["h2"])}</h2><p>{text}</p>'
             f'<dl class="proof-stats">{"".join(stats)}</dl></div>\n</section>'
         )
@@ -683,22 +722,64 @@ class PageRenderer:
             bits.append(self.fill(self.ctx.text(self.lang, "needs_signin").replace("{signin}", str(signin))))
         return f'<span class="meta">{esc(" · ".join(bits))}</span>' if bits else ""
 
+    def s_game_search(self, s: dict[str, Any], i: int) -> str:
+        """Search every checked item; no match offers the waitlist form ("tell me when it's in")."""
+        hid = self.heading_id(s, i)
+        t = lambda key: self.ctx.text(self.lang, key)  # noqa: E731
+        collection = s.get("collection", next(iter(self.ctx.items), ""))
+        hub = self.ctx.project.collections.get(collection, {}).get("hub")
+        fallback = f'<noscript><p><a href="{esc(self.ctx.path_of(hub, self.lang))}">{esc(t("search_all"))}</a></p></noscript>' if hub in self.ctx.pages else ""
+        sid = f"search-{i + 1}"
+        text = f"<p>{self.md(s['text'])}</p>" if s.get("text") else ""
+        return (
+            f'<section class="art search" aria-labelledby="{hid}" data-game-search="/data/{esc(collection)}-{esc(self.lang)}.json">\n'
+            f'  <div><h2 id="{hid}">{self.md(s["h2"])}</h2>{text}</div>\n'
+            '  <div class="body">\n'
+            f'    <label class="wl-label" for="{sid}">{esc(t("search_label"))}</label>\n'
+            f'    <input id="{sid}" class="search-input" type="search" autocomplete="off" spellcheck="false" placeholder="{esc(plain(t("search_placeholder")))}" data-search-input>\n'
+            '    <ul class="search-results" data-search-results aria-live="polite"></ul>\n'
+            f'    <div class="search-miss on-paper" data-search-miss hidden><p class="search-miss-h">{esc(t("search_miss"))}</p>'
+            f'{self.cta("waitlist", sid)}</div>\n'
+            f"    {fallback}\n"
+            "  </div>\n</section>"
+        )
+
+    def s_hardware_check(self, s: dict[str, Any], i: int) -> str:
+        """Tells the visitor at once whether their graphics card fits. Runs in the browser; nothing is sent."""
+        conf = self.ctx.project.raw.get("hardware_check", {})
+        t = lambda key: self.ctx.text(self.lang, key)  # noqa: E731
+        rules = {
+            "models": [str(m) for m in conf.get("models", [])],
+            "not_yet": [str(m) for m in conf.get("not_yet", [])],
+            "not_host": [str(m) for m in conf.get("not_host", [])],
+            "family": [str(m) for m in conf.get("family", [])],
+        }
+        # {model} is filled in the browser with the detected card; everything else is filled here.
+        messages = {key: self.fill(t("hw_" + key).replace("{model}", "\x02")).replace("\x02", "{model}") for key in ("fits", "not_yet", "not_host", "below")}
+        return (
+            f'<div class="hw-check" data-hardware-check hidden>'
+            f'<script type="application/json" data-hw-rules>{script_json({"rules": rules, "messages": messages})}</script>'
+            '<p class="hw-line" data-hw-line aria-live="polite"></p></div>'
+        )
+
     def s_waitlist_status(self, s: dict[str, Any], i: int) -> str:
         self.has_waitlist = True
         t = lambda key: self.ctx.text(self.lang, key)  # noqa: E731
+        form = self.cta("host-waitlist" if self.role == "host" else "waitlist", "status")
         return (
-            '<section class="wl-status on-paper" data-waitlist-status aria-live="polite">\n'
-            f'  {self.crumbs()}<h1 id="h1" data-status-title>{esc(t("status_title"))}</h1>\n'
-            f'  <p data-status-text>{esc(t("status_loading"))}</p>\n'
+            f'<section class="wl-status on-paper" data-waitlist-status data-role="{self.role}">\n'
+            f'  {self.crumbs()}<h1 id="h1" data-status-title>{esc(t("status_title_" + self.role))}</h1>\n'
+            f'  <p data-status-text aria-live="polite">{esc(t("status_loading"))}</p>\n'
             '  <div data-status-card hidden>\n'
             '    <dl class="facts"><dt data-k="position"></dt><dd data-v="position"></dd>'
             '<dt data-k="referrals"></dt><dd data-v="referrals"></dd></dl>\n'
-            f'    <h2>{esc(t("share_title"))}</h2><p>{self.md(t("share_text_" + self.role))}</p>\n'
-            '    <div class="share"><input data-invite readonly aria-label="Invite link">'
+            f'    <h2>{esc(t("share_title_" + self.role))}</h2><p>{self.md(t("share_text_" + self.role))}</p>\n'
+            f'    <div class="share"><input data-invite readonly aria-label="{esc(t("invite_label"))}">'
             f'<button type="button" class="lpill lpill-sm solid" data-copy>{esc(t("share_copy"))}</button></div>\n'
             '    <div class="share-buttons" data-share-buttons></div>\n'
             f'    <p class="note"><a href="#" data-leave>{esc(t("leave"))}</a></p>\n'
             "  </div>\n"
+            f'  <div class="wl-status-form" data-status-form>{form}</div>\n'
             f'  <noscript><p>{esc(t("status_noscript"))}</p></noscript>\n</section>'
         )
 
@@ -706,6 +787,7 @@ class PageRenderer:
         if kind == "none":
             return ""
         self.has_waitlist = True
+        self.ctx.forms += 1
         role = "host" if kind == "host-waitlist" else "player"
         t = lambda key: self.ctx.text(self.lang, key)  # noqa: E731
         fid = f"wl-{where}"
@@ -715,20 +797,22 @@ class PageRenderer:
         return (
             f'<form class="wl" data-waitlist action="/api/waitlist" method="post" novalidate>\n'
             f'  <input type="hidden" name="role" value="{role}"><input type="hidden" name="lang" value="{esc(self.lang)}">'
-            '<input type="hidden" name="ref" value=""><input type="hidden" name="src" value="">'
+            '<input type="hidden" name="ref" value=""><input type="hidden" name="src" value=""><input type="hidden" name="anon" value="">'
             f'<input type="hidden" name="page" value="{esc(self.page.id)}">\n'
             '  <p class="hp" aria-hidden="true"><label>Website <input name="website" tabindex="-1" autocomplete="off"></label></p>\n'
+            f'  <p class="wl-ref" data-ref-note hidden>{esc(self.fill(t("ref_note_" + role)))}</p>\n'
             '  <div class="wl-state">\n'
             f'    <label class="wl-label" for="{fid}">{esc(t(prefix + "wl_label"))}</label>\n'
             f'    <div class="wl-row"><input id="{fid}" name="email" type="email" autocomplete="email" inputmode="email" '
-            f'spellcheck="false" required placeholder="{esc(t("wl_placeholder"))}" aria-describedby="{fid}-help">'
+            f'spellcheck="false" required placeholder="{esc(plain(t("wl_placeholder")))}" aria-describedby="{fid}-help">'
             f'<button class="lpill solid" type="submit"><span>{esc(button)}</span>{ARROW}</button></div>\n'
             f'    <p class="wl-err" role="alert" hidden>{esc(t("wl_error"))}</p>\n'
             f'    <p class="wl-help" id="{fid}-help">{self.md(t(prefix + "wl_help"))}</p>\n'
             f'    <p class="wl-count" data-waitlist-count="{role}" hidden>{esc(t(counter_key).replace("{brand}", str(self.ctx.project.brand["name"])))}</p>\n'
             "  </div>\n"
             f'  <div class="wl-done" hidden tabindex="-1"><p class="wl-done-h">{esc(t("wl_done_title"))}</p>'
-            f'<p>{esc(t("wl_done_text"))}</p></div>\n'
+            f'<p data-done-text>{esc(t("wl_done_text"))}</p><p class="wl-help">{esc(t("wl_spam_hint"))}</p>'
+            f'<p><button type="button" class="linkish" data-wrong-address>{esc(t("wl_wrong_address"))}</button></p></div>\n'
             "</form>"
         )
 

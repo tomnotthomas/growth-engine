@@ -1,0 +1,32 @@
+id = "legal"
+kind = "legal"
+noindex = true
+sitemap = false
+
+[langs.en]
+path = "/legal/"
+title = "Legal notice | {brand}"
+description = "Who runs {brand}."
+
+[[langs.en.sections]]
+type = "intro"
+h1 = "Legal notice"
+
+[[langs.en.sections]]
+type = "article"
+h2 = "Provider"
+body = [{ p = "{legal.name}, {legal.street}, {legal.postcode_city}" }, { p = "[{legal.email}](mailto:{legal.email})" }]
+
+[langs.de]
+path = "/de/impressum/"
+title = "Impressum | {brand}"
+description = "Wer hinter {brand} steht."
+
+[[langs.de.sections]]
+type = "intro"
+h1 = "Impressum"
+
+[[langs.de.sections]]
+type = "article"
+h2 = "Anbieter"
+body = [{ p = "{legal.name}, {legal.street}, {legal.postcode_city}" }, { p = "[{legal.email}](mailto:{legal.email})" }]

@@ -18,7 +18,7 @@ from .html import safe_href
 if TYPE_CHECKING:
     from ..config import Project
 
-KINDS = {"landing", "guide", "hub", "item", "waitlist"}
+KINDS = {"landing", "guide", "hub", "item", "waitlist", "legal"}
 SECTION_FIELDS: dict[str, tuple[str, ...]] = {
     "hero": ("lines",),
     "intro": ("h1",),
@@ -34,6 +34,8 @@ SECTION_FIELDS: dict[str, tuple[str, ...]] = {
     "item-strip": ("h1",),
     "listing": ("groups",),
     "waitlist-status": (),
+    "game-search": ("h2",),
+    "hardware-check": (),
 }
 CTAS = {"waitlist", "host-waitlist", "none"}
 PLACEHOLDER = re.compile(r"\{([a-z_][a-z0-9_.]*)\}")
@@ -123,6 +125,24 @@ def validate_site(project: "Project") -> list[str]:
 
     brand = str(project.brand.get("name", ""))
     forbidden_chars = list(project.site.get("forbid_chars", []))
+    legal_keys = {f"legal.{key}" for key in project.raw.get("legal", {})}
+    if project.raw.get("hardware_check"):
+        legal_keys |= {"hardware.floor", "hardware.models"}
+    live = project.site.get("live_languages")
+    if live is not None:
+        for lang in live:
+            if lang not in project.languages:
+                errors.append(f"{where}: [site] live_languages lists {lang!r}, which is not in languages")
+    for page_id in project.site.get("footer_links", []):
+        if page_id not in pages:
+            errors.append(f"{where}: [site] footer_links names unknown page {page_id!r}")
+    for key in ("legal_notice", "privacy"):
+        value = str(project.site.get(key, "") or "")
+        if value and not value.startswith("/") and value not in pages:
+            errors.append(f"{where}: [site] {key} must be a page id or a path, not {value!r}")
+    share = project.site.get("share_image")
+    if isinstance(share, dict) and project.default_language not in share:
+        errors.append(f"{where}: [site] share_image needs an entry for the default language")
     seen_paths: dict[str, str] = {}
     collection_keys = {cid: _item_keys(project, cid) for cid in project.collections}
 
@@ -148,7 +168,7 @@ def validate_site(project: "Project") -> list[str]:
             seen_paths[spec.path] = f"{page.id}/{lang}"
             if not spec.title or not spec.description:
                 errors.append(f"{lloc}: title and description are required")
-            allowed = SITE_KEYS | (collection_keys.get(page.collection, set()) if page.kind == "item" else set())
+            allowed = SITE_KEYS | legal_keys | (collection_keys.get(page.collection, set()) if page.kind == "item" else set())
             for text in _strings(spec):
                 for name in PLACEHOLDER.findall(text):
                     if name not in allowed:

@@ -41,8 +41,6 @@ class SiteTestCase(HomeTestCase):
     def make_public(self) -> None:
         self.edit("projects/example/project.toml", "domain_decided = false", "domain_decided = true")
         self.edit("projects/example/project.toml", "indexable = false", "indexable = true")
-        self.edit("projects/example/project.toml", 'legal_notice = ""', 'legal_notice = "/legal/"')
-        self.edit("projects/example/project.toml", 'privacy = ""', 'privacy = "/privacy/"')
 
 
 class Pages(SiteTestCase):
@@ -51,7 +49,20 @@ class Pages(SiteTestCase):
         paths = sorted(p.path for p in result.pages)
         self.assertEqual(
             paths,
-            ["/", "/de/", "/de/warteliste/", "/guide/", "/plugins/", "/plugins/glasshouse-reverb/", "/plugins/tapeworm-delay/", "/waitlist/"],
+            [
+                "/",
+                "/de/",
+                "/de/datenschutz/",
+                "/de/impressum/",
+                "/de/warteliste/",
+                "/guide/",
+                "/legal/",
+                "/plugins/",
+                "/plugins/glasshouse-reverb/",
+                "/plugins/tapeworm-delay/",
+                "/privacy/",
+                "/waitlist/",
+            ],
         )
         self.assertFalse((self.public / "plugins" / "mothwing-synth").exists())  # under 30 searches
         for path in paths:
@@ -108,7 +119,8 @@ class Pages(SiteTestCase):
         html = self.page("/plugins/tapeworm-delay/")
         self.assertIn("Tapeworm Delay only ships for Windows.", html)
         self.assertIn("18 ms", html)  # measured, with a source
-        self.assertIn("Measured value to come", html)  # resolution and fps were not measured
+        self.assertNotIn("Measured value to come", html)  # only measured values are shown
+        self.assertNotIn("Placeholder", html)  # and no empty video slot without a recording
         self.assertIn('href="/plugins/glasshouse-reverb/"', html)  # similar plugin with a page
 
     def test_hub_lists_running_blocked_and_native_items(self) -> None:
@@ -216,7 +228,7 @@ class Pages(SiteTestCase):
             html = self.page(page.path)
             if 'nav-cta" href="#beta"' in html:
                 self.assertIn('id="beta"', html, page.path)
-        self.assertIn('nav-cta" href="/#beta"', self.page("/waitlist/"))
+        self.assertNotIn("nav-cta", self.page("/waitlist/"))  # the status page carries its own form
 
     def test_breadcrumbs_keep_absolute_links_and_videos_have_a_description(self) -> None:
         self.edit("projects/example/pages/plugin.toml", '{ text = "{brand}", href = "page:landing" }', '{ text = "{brand}", href = "app:" }')

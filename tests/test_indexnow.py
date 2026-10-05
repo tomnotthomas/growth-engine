@@ -18,8 +18,6 @@ class Batches(HomeTestCase):
         super().setUp()
         self.edit("projects/example/project.toml", "domain_decided = false", "domain_decided = true")
         self.edit("projects/example/project.toml", "indexable = false", "indexable = true")
-        self.edit("projects/example/project.toml", 'legal_notice = ""', 'legal_notice = "/legal/"')
-        self.edit("projects/example/project.toml", 'privacy = ""', 'privacy = "/privacy/"')
         self.append("projects/example/project.toml", '[channels.indexnow]\nenabled = true\n\n[jobs.ping]\nkind = "indexnow"\nschedule = "daily 05:00"\nkey = "abcdefgh12"\n')
 
     def ctx(self) -> JobContext:

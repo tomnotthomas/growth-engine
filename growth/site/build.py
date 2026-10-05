@@ -101,6 +101,7 @@ def build_site(project: Any, state_dir: Path, dist_root: Path, *, now: datetime)
         today=today,
         checked=checked,
         site_indexable=bool(project.site.get("indexable")),
+        live_languages=live_languages(project),
     )
     theme = project.root / project.site.get("theme", "theme")
     sheets = [BASE_THEME / name for name in BASE_CSS] if project.site.get("base_theme", True) else []
@@ -109,16 +110,21 @@ def build_site(project: Any, state_dir: Path, dist_root: Path, *, now: datetime)
     js = (ENGINE_ASSETS / "waitlist.js").read_text(encoding="utf-8")
     ctx.asset_version = "?v=" + sha256(css + js)[:10]
 
+    if project.raw.get("waitlist"):
+        _require_legal(project, pages)
     rendered: list[Rendered] = []
     for page in pages.values():
+        langs = [lang for lang in page.langs if ctx.live(lang)]
         if page.kind == "item":
             for item in items.get(page.collection, []):
                 if item.has_page:
-                    for lang in page.langs:
+                    for lang in langs:
                         rendered.append(PageRenderer(ctx, page, lang, item).render())
         else:
-            for lang in page.langs:
+            for lang in langs:
                 rendered.append(PageRenderer(ctx, page, lang).render())
+    if ctx.forms:
+        _require_legal(project, pages)
 
     changed = _update_registry(registry, rendered, items, today)
     for page in rendered:
@@ -150,11 +156,12 @@ def build_site(project: Any, state_dir: Path, dist_root: Path, *, now: datetime)
                 if not INDEXNOW_KEY.fullmatch(key):
                     raise BuildError(f"jobs.{job.id}: key must be 8-128 letters, digits or dashes")
                 write_atomic(public / f"{key}.txt", key)
-        _write_404(project, ui, public, ctx.asset_version)
+        _write_404(project, ui, public, ctx.asset_version, ctx.live_languages)
+        _write_search_data(ctx, public)
         if project.raw.get("waitlist"):
             from ..waitlist.bundle import write_bundle
 
-            write_bundle(project, ui, tmp)
+            write_bundle(project, ui, tmp, ctx.live_languages)
         _swap(tmp, out)
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -165,6 +172,58 @@ def build_site(project: Any, state_dir: Path, dist_root: Path, *, now: datetime)
     if not ctx.site_indexable:
         notes.append("site is not indexable yet (robots: Disallow, every page noindex)")
     return BuildResult(out=out, pages=rendered, changed=changed, registry=registry, notes=notes)
+
+
+def live_languages(project: Any) -> list[str]:
+    """Languages whose pages are built. Others stay wave-ready: validated, but not generated or linked."""
+    live = project.site.get("live_languages")
+    return [lang for lang in project.languages if live is None or lang in live]
+
+
+def missing_legal(project: Any, pages: dict[str, Any]) -> list[str]:
+    """What still keeps a sign-up form from being lawful: unset legal pages or empty [legal] values they use."""
+    missing = []
+    legal = project.raw.get("legal", {})
+    for key in ("legal_notice", "privacy"):
+        value = str(project.site.get(key, "") or "")
+        if not value:
+            missing.append(f"[site] {key} is not set")
+            continue
+        page = pages.get(value)
+        if page is None:
+            continue
+        used = set()
+        for spec in page.langs.values():
+            used.update(re.findall(r"\{legal\.([a-z_]+)\}", repr(spec.sections) + spec.title + spec.description))
+        for name in sorted(used):
+            if not str(legal.get(name, "")).strip():
+                missing.append(f"[legal] {name} is empty (used by page {value})")
+    return sorted(set(missing))
+
+
+def _require_legal(project: Any, pages: dict[str, Any]) -> None:
+    missing = missing_legal(project, pages)
+    if missing:
+        raise BuildError("sign-up forms need the legal notice and privacy pages: " + "; ".join(missing) + " (the previous site stays as it is)")
+
+
+def _write_search_data(ctx: SiteContext, public: Path) -> None:
+    """One small JSON list per collection and language for the on-site game search."""
+    for cid, collection in ctx.items.items():
+        for lang in ctx.live_languages or ctx.project.languages:
+            rows = []
+            for item in collection:
+                if item.status == "unchecked" or (item.status == "playable" and not item.live):
+                    continue
+                status = "runs" if item.status == "playable" else item.status
+                page_id = ctx.item_page(item)
+                href = ctx.path_of(page_id, lang, item) if page_id else ""
+                note = ""
+                if item.status == "blocked":
+                    note = str(item.record.get(f"reason_{lang}") or (item.record.get("reason", "") if lang == ctx.project.default_language else ""))
+                rows.append({"name": item.name, "status": status, "href": href, "note": note})
+            rows.sort(key=lambda r: r["name"].lower())
+            write_json(public / "data" / f"{cid}-{lang}.json", rows)
 
 
 def _copy_media(project: Any, media: dict[str, Any], used: set[str], public: Path) -> None:
@@ -232,18 +291,27 @@ def _write_robots_and_sitemap(project: Any, rendered: list[Rendered], registry: 
     )
 
 
-def _write_404(project: Any, ui: dict[str, Any], public: Path, version: str) -> None:
+def _write_404(project: Any, ui: dict[str, Any], public: Path, version: str, languages: list[str]) -> None:
+    """One 404 page that speaks every live language, each with a link to its own home page."""
+    pages = load_pages(project)
+    home = pages.get(project.site.get("home", "player"))
     lang = project.default_language
     texts = ui.get(lang, {})
-    home = "/"
+    lines = []
+    for other in languages or [lang]:
+        t = ui.get(other, {})
+        path = home.langs[other].path if home and other in home.langs else "/"
+        lines.append(
+            f'<p lang="{esc(other)}">{esc(t.get("not_found_title", "Not found"))} <a href="{esc(path)}">{esc(t.get("not_found_link", "Home"))}</a></p>'
+        )
     write_atomic(
         public / "404.html",
         f'<!doctype html>\n<html lang="{esc(lang)}">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n<meta name="robots" content="noindex">\n'
-        f"<title>{esc(texts.get('not_found_title', 'Not found'))}</title>\n"
-        f'<link rel="stylesheet" href="/assets/site.css{version}">\n</head>\n<body class="page-404">\n<main class="art intro">'
-        f"<div><h1>{esc(texts.get('not_found_title', 'Not found'))}</h1></div>"
-        f'<div class="body"><p><a href="{home}">{esc(texts.get("not_found_link", "Home"))}</a></p></div></main>\n</body>\n</html>\n',
+        f"<title>{esc(texts.get('not_found_title', 'Not found'))} | {esc(project.brand['name'])}</title>\n"
+        f'<link rel="stylesheet" href="/assets/site.css{version}">\n</head>\n<body class="page-404">\n'
+        f'<header class="nav"><a class="wordmark" href="/">{esc(project.brand.get("wordmark", project.brand["name"]))}</a></header>\n'
+        f'<main class="art intro"><div><h1>404</h1></div><div class="body">{"".join(lines)}</div></main>\n</body>\n</html>\n',
     )
 
 

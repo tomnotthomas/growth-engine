@@ -13,6 +13,11 @@ h1 = "Audio plugins in the browser"
 lead = ["Only what really runs."]
 
 [[langs.en.sections]]
+type = "game-search"
+h2 = "Does my plugin run?"
+collection = "plugins"
+
+[[langs.en.sections]]
 type = "listing"
 collection = "plugins"
 groups = [

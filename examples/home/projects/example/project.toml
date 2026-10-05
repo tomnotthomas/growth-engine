@@ -18,8 +18,9 @@ app_url = "https://app.kiln.example/"
 base_url = "https://kiln.example"
 domain_decided = false
 indexable = false
-legal_notice = ""
-privacy = ""
+legal_notice = "legal"
+privacy = "privacy"
+footer_links = ["guide"]
 home = "landing"
 host_home = "landing"
 pages = "pages"
@@ -34,6 +35,14 @@ theme_css = ["css/tokens.css"]
 theme_color = "#121212"
 forbid_chars = ["—"]
 out = "example"
+
+
+[legal]
+# Fictional values for the example; a real project fills in its operator's details.
+name = "Kiln Example Studio"
+street = "Example Street 1"
+postcode_city = "12345 Example Town"
+email = "hello@kiln.example"
 
 [rules]
 footage_publishers = ["Kiln Audio"]
