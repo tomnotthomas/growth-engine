@@ -39,11 +39,11 @@ SECTION_FIELDS: dict[str, tuple[str, ...]] = {
 }
 # The keys every list entry of a section needs, checked for every language (live or not), so a copy-paste
 # into the wrong list fails `growth check` instead of the build of a later language wave.
-ITEM_FIELDS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "steps": ("items", ("h", "p")),
-    "features": ("items", ("h", "p")),
-    "faq": ("items", ("q", "a")),
-    "spec": ("rows", ("label", "value")),
+ITEM_FIELDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "steps": (("items",), ("h", "p")),
+    "features": (("items",), ("h", "p")),
+    "faq": (("items", "fallback"), ("q", "a")),
+    "spec": (("rows",), ("label", "value")),
 }
 CTAS = {"waitlist", "host-waitlist", "none"}
 PLACEHOLDER = re.compile(r"\{([a-z_][a-z0-9_.]*)\}")
@@ -211,13 +211,14 @@ def _check_section(section: dict[str, Any], loc: str, project: "Project", pages:
         return [f"{loc}: unknown section type {stype!r}"]
     errors = [f"{loc} ({stype}): missing {name!r}" for name in SECTION_FIELDS[stype] if name not in section]
     if stype in ITEM_FIELDS:
-        list_key, keys = ITEM_FIELDS[stype]
-        entries = section.get(list_key)
-        # "@field" pulls the list from an item at render time; only literal lists are checked here.
-        for n, entry in enumerate(entries if isinstance(entries, list) else []):
-            missing = [k for k in keys if not isinstance(entry, dict) or k not in entry]
-            if missing:
-                errors.append(f"{loc} ({stype}): {list_key}[{n}] needs {', '.join(repr(k) for k in missing)}")
+        list_keys, keys = ITEM_FIELDS[stype]
+        for list_key in list_keys:
+            entries = section.get(list_key)
+            # "@field" pulls the list from an item at render time; only literal lists are checked here.
+            for n, entry in enumerate(entries if isinstance(entries, list) else []):
+                missing = [k for k in keys if not isinstance(entry, dict) or k not in entry]
+                if missing:
+                    errors.append(f"{loc} ({stype}): {list_key}[{n}] needs {', '.join(repr(k) for k in missing)}")
     cta = section.get("cta")
     if cta is not None and cta not in CTAS:
         errors.append(f"{loc}: cta must be one of {sorted(CTAS)}")

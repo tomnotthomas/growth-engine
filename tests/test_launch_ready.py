@@ -77,6 +77,16 @@ class SiteBuild(HomeTestCase):
             self.engine()
         self.assertIn("(faq): items[0] needs 'q', 'a'", str(caught.exception))
 
+    def test_a_bad_faq_fallback_entry_fails_check(self) -> None:
+        self.edit(
+            "projects/example/pages/plugin.toml",
+            'fallback = [{ q = "Does {name} run on a Mac?", a = "Yes, in the browser." }]',
+            'fallback = [{ h = "Does {name} run on a Mac?", p = "Yes, in the browser." }]',
+        )
+        with self.assertRaises(ConfigError) as caught:
+            self.engine()
+        self.assertIn("(faq): fallback[0] needs 'q', 'a'", str(caught.exception))
+
     def test_game_search_data_lists_running_blocked_and_native_items_with_links(self) -> None:
         self.build()
         rows = json.loads((self.public / "data" / "plugins-en.json").read_text())
