@@ -1,5 +1,5 @@
 // The waitlist Worker against a real SQLite database (node:sqlite standing in for Cloudflare D1).
-// Run: node --test tests/worker/   (Node 22.5 or newer)
+// Run: node --test tests/worker/*.test.mjs   (Node 22.5 or newer)
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";

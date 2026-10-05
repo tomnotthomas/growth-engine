@@ -319,14 +319,14 @@ def _check_project_jobs(project: Project, where: str, errors: list[str]) -> None
         kind = JOB_KINDS[job.kind]
         if kind.scope == ENGINE_SCOPE:
             errors.append(f"{where}: jobs.{job.id}: kind {job.kind!r} runs once for the engine; configure it in engine.toml")
+        if not job.enabled:
+            continue
         if kind.channel and not project.channel_enabled(kind.channel):
             level = ch.CHANNELS[kind.channel].level
             errors.append(
                 f"{where}: jobs.{job.id}: needs channel {kind.channel!r} enabled (level {level}); "
                 "a job on a channel that may not run does not run at all"
             )
-        if not job.enabled:
-            continue
         if job.kind.startswith("directories-"):
             conf = project.raw.get("directories", {})
             if job.kind == "directories-draft" and not (project.root / str(conf.get("fact_sheet", ""))).is_file():

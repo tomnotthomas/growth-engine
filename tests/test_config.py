@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from growth.config import ConfigError, default_home, load_engine
+from growth.runner import run_now
 from growth.schedule import parse_schedule
 
 from .helpers import HomeTestCase
@@ -78,10 +79,19 @@ class Rejects(HomeTestCase):
         self.append("projects/example/project.toml", '[jobs.ping]\nkind = "indexnow"\nschedule = "daily 05:00"\nkey = "abcdefgh12"\n')
         self.assertRejected("needs channel 'indexnow' enabled")
 
-    def test_switched_off_job_on_a_channel_that_is_off(self) -> None:
+    def test_switched_off_job_on_a_channel_that_is_off_loads_but_never_runs(self) -> None:
         self.only_core_jobs()
         self.edit("projects/example/project.toml", "[channels.directory-submit]\nenabled = true", "[channels.directory-submit]\nenabled = false")
-        self.assertRejected("needs channel 'directory-submit' enabled")
+        engine = self.engine()
+        with self.assertRaisesRegex(KeyError, "switched off"):
+            run_now(engine, "example", "directories-submit")
+
+    def test_pre_launch_home_with_indexnow_off_loads(self) -> None:
+        self.append("projects/example/project.toml", '[jobs.ping]\nkind = "indexnow"\nschedule = "daily 05:00"\nenabled = false\nkey = ""\n')
+        engine = self.engine()
+        self.assertFalse(engine.projects["example"].channel_enabled("indexnow"))
+        with self.assertRaisesRegex(KeyError, "switched off"):
+            run_now(engine, "example", "ping")
 
     def test_ai_args_that_need_a_paid_key(self) -> None:
         self.edit("engine.toml", "extra_args = []", 'extra_args = ["--max-budget-usd=5"]')

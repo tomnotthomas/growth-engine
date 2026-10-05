@@ -195,6 +195,11 @@ class Pages(SiteTestCase):
         self.build()
         self.assertEqual(sorted(p.name for p in self.public.glob("*.txt")), ["robots.txt"])
 
+    def test_a_switched_off_indexnow_job_builds_with_the_channel_off(self) -> None:
+        self.append("projects/example/project.toml", '[jobs.ping]\nkind = "indexnow"\nschedule = "daily 05:00"\nenabled = false\nkey = ""\n')
+        self.build()
+        self.assertEqual(sorted(p.name for p in self.public.glob("*.txt")), ["robots.txt"])
+
     def test_a_bad_indexnow_key_never_leaves_public(self) -> None:
         self.make_public()
         self.append("projects/example/project.toml", '[channels.indexnow]\nenabled = true\n\n[jobs.ping]\nkind = "indexnow"\nschedule = "daily 05:00"\nkey = "abcdefgh12"\n')
