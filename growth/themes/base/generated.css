@@ -1,0 +1,617 @@
+/* What the base components need to work as static, script-free generated pages without
+   third-party art: no-JS navigation, a neutral hero visual, title cards, lists, waitlist states. */
+
+/* ---------- Skip link ---------- */
+.skip {
+  position: absolute;
+  left: var(--gut);
+  top: -60px;
+  z-index: 50;
+  padding: 10px 16px;
+  background: var(--accent);
+  color: var(--on-paper);
+  font: 500 14px/1 var(--f);
+  text-decoration: none;
+  border-radius: 999px;
+}
+.skip:focus {
+  top: 12px;
+}
+
+/* ---------- Navigation: the scrolled state is the only state (no script) ---------- */
+.nav {
+  background: rgb(18 18 18 / 0.86);
+  border-bottom-color: var(--line);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .nav {
+    background: var(--bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+.nav .lang {
+  display: inline-flex;
+}
+.nav-links:empty {
+  margin-left: auto;
+}
+.lang a {
+  display: inline-grid;
+  place-items: center;
+  min-width: 40px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: var(--ink-2);
+  font: 500 12px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  transition:
+    background-color 0.3s var(--ease),
+    color 0.3s var(--ease);
+}
+.lang a[aria-current="true"] {
+  background: var(--ink);
+  color: var(--bg);
+}
+.lang a:not([aria-current="true"]):hover {
+  color: var(--ink);
+}
+
+/* ---------- Hero: the drafted promise (approved player page B) ----------
+   The promise is drafted like a title on a technical drawing: width dimension, cap line, baseline,
+   one accent mark. The sign-up sits in a paper cell at the lower right. */
+.hero {
+  position: relative;
+  min-height: 100dvh;
+  display: grid;
+  overflow: hidden;
+  background: #0d0d0d;
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(to bottom, rgb(10 10 10 / 0.72), transparent 22%),
+    linear-gradient(to top, rgb(10 10 10 / 0.86) 0%, rgb(10 10 10 / 0.35) 46%, transparent 70%),
+    radial-gradient(90% 80% at 0% 100%, rgb(10 10 10 / 0.6), transparent 60%);
+}
+.hero-inner {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 440px);
+  align-items: end;
+  gap: clamp(24px, 3vw, 48px);
+  padding: calc(var(--nav) + 40px) var(--gut) clamp(28px, 5vh, 56px);
+}
+.promise {
+  position: relative;
+  min-width: 0;
+  padding-top: 26px;
+}
+.promise .dim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--w, 60%);
+  height: 9px;
+  border-left: 1px solid rgb(239 239 237 / 0.7);
+  border-right: 1px solid rgb(239 239 237 / 0.7);
+}
+.promise .dim::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  border-top: 1px solid rgb(239 239 237 / 0.7);
+}
+.promise h1 {
+  margin: 0;
+  font: 400 var(--fs, clamp(34px, 5.6vw, 96px)) / 1 var(--wide);
+  letter-spacing: -0.01em;
+  text-transform: uppercase;
+  color: #f4f4f2;
+  width: max-content;
+  max-width: 100%;
+}
+.promise h1 span {
+  display: block;
+  white-space: nowrap;
+  position: relative;
+  padding: 0.08em 0 0.04em;
+}
+.promise h1 span::after {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--gut));
+  right: -100vw;
+  bottom: 0.02em;
+  border-top: 1px dashed rgb(239 239 237 / 0.4);
+}
+.promise h1 span:first-child::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--gut));
+  right: -100vw;
+  top: 0.1em;
+  border-top: 1px dashed rgb(239 239 237 / 0.4);
+}
+.promise .mark {
+  position: absolute;
+  left: 0;
+  top: var(--base, 100%);
+}
+
+.cell {
+  position: relative;
+  z-index: 1;
+  background: var(--paper);
+  color: var(--on-paper);
+  padding: clamp(22px, 2.4vw, 32px);
+  min-width: 0;
+}
+.cell .sub {
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--on-paper-2);
+  margin-bottom: 22px;
+}
+.cell .wl-row {
+  flex-direction: column;
+}
+.cell .wl-row .lpill {
+  width: 100%;
+}
+@media (max-width: 900px) {
+  .hero-inner {
+    grid-template-columns: 1fr;
+    padding-top: calc(var(--nav) + 120px);
+  }
+}
+@media (max-width: 680px) {
+  .promise h1 {
+    font-size: max(34px, var(--fs, 34px));
+    width: auto;
+  }
+  .promise h1 span {
+    white-space: normal;
+  }
+  .promise h1 span::after,
+  .promise h1 span:first-child::before {
+    display: none;
+  }
+  .hero::before {
+    background:
+      linear-gradient(to bottom, rgb(10 10 10 / 0.72), rgb(10 10 10 / 0.42) 40%, rgb(10 10 10 / 0.42) 60%, rgb(10 10 10 / 0.86));
+  }
+}
+
+/* Without a measuring script, the type is sized from the longest line (the engine writes --chars
+   and --word): the promise is a size container and the drafted block hugs its longest line, so the
+   dimension line and the mark follow it. Wide display faces advance about 0.84em per character. */
+[hidden] {
+  display: none !important;
+}
+.promise {
+  container-type: inline-size;
+  padding-top: 0;
+}
+.promise .draft {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  padding-top: 26px;
+}
+.promise .dim {
+  width: 100%;
+}
+.promise h1 {
+  font-size: min(96px, calc(100cqi / (var(--chars) * 0.84)));
+}
+.promise .mark {
+  top: auto;
+  bottom: -12px;
+}
+@media (max-width: 680px) {
+  .promise h1 {
+    font-size: min(52px, calc(100cqi / (var(--word) * 0.84)));
+  }
+}
+
+/* ---------- Neutral hero art: the Mac's screen as the only light in the room ----------
+   No game art: a 16:10 display seen in the dark, measured like the titles are drafted. */
+.hero {
+  min-height: min(100dvh, 920px);
+}
+.hero-art {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 70% at 78% 34%, var(--glow), transparent 62%),
+    radial-gradient(80% 90% at 82% 30%, rgb(239 239 237 / 0.09), transparent 70%),
+    #0c0c0c;
+}
+.hero-art::before {
+  /* the screen */
+  content: "";
+  position: absolute;
+  right: clamp(-160px, -6vw, -40px);
+  top: calc(var(--nav) + 6vh);
+  width: min(74vw, 1180px);
+  aspect-ratio: 16 / 10;
+  border: 1px solid rgb(239 239 237 / 0.22);
+  border-radius: 18px;
+  background:
+    linear-gradient(160deg, rgb(239 239 237 / 0.1), rgb(239 239 237 / 0.015) 46%, transparent 70%),
+    #141414;
+  box-shadow:
+    0 40px 120px rgb(0 0 0 / 0.6),
+    inset 0 1px 0 rgb(239 239 237 / 0.12);
+}
+.hero-art::after {
+  /* its width, drafted like the promise's dimension line */
+  content: "";
+  position: absolute;
+  right: clamp(-160px, -6vw, -40px);
+  top: calc(var(--nav) + 6vh - 22px);
+  width: min(74vw, 1180px);
+  height: 9px;
+  border-left: 1px solid rgb(239 239 237 / 0.35);
+  border-right: 1px solid rgb(239 239 237 / 0.35);
+  background: linear-gradient(rgb(239 239 237 / 0.35), rgb(239 239 237 / 0.35)) 0 4px / 100% 1px no-repeat;
+}
+@media (max-width: 680px) {
+  .hero-art::before,
+  .hero-art::after {
+    width: 120vw;
+    right: -40vw;
+  }
+}
+
+/* Game pages use the same room, shorter. */
+.g-hero {
+  min-height: min(52vh, 560px);
+}
+.g-hero .hero-art::before {
+  top: calc(var(--nav) + 3vh);
+  width: min(60vw, 980px);
+}
+.g-hero .hero-art::after {
+  top: calc(var(--nav) + 3vh - 22px);
+  width: min(60vw, 980px);
+}
+
+/* ---------- Title cards instead of key art ---------- */
+.lib-tiles figure a {
+  color: inherit;
+  text-decoration: none;
+  display: block;
+}
+.lib-tiles .card {
+  display: flex;
+  align-items: flex-end;
+  aspect-ratio: 3 / 4;
+  padding: clamp(14px, 1.6vw, 22px);
+  background: #1c1c1c;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  transition: border-color 0.35s var(--ease), transform 0.45s var(--ease);
+}
+.lib-tiles .card span {
+  font: 400 clamp(15px, 1.6vw, 24px) / 1.15 var(--wide);
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.lib-tiles figure:nth-child(3n + 1) .card {
+  background: var(--paper);
+  color: var(--on-paper);
+  border-color: transparent;
+}
+.lib-tiles figure:nth-child(3n + 2) .card {
+  background: var(--grey);
+  color: var(--on-paper);
+  border-color: transparent;
+}
+.lib-tiles a:hover .card {
+  border-color: var(--accent-edge);
+  transform: translateY(-3px);
+}
+.lib-tiles a:hover figcaption {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 4px;
+}
+
+/* ---------- Guide and side-page intro ---------- */
+.art.intro {
+  padding-top: calc(var(--nav) + clamp(48px, 6vw, 88px));
+  border-top: 0;
+}
+.art.intro h1 {
+  margin-top: 14px;
+  font: 300 clamp(34px, 4.4vw, 64px) / 1.04 var(--f);
+  letter-spacing: -0.02em;
+}
+.art.intro .body p:first-child {
+  font-size: 20px;
+  color: var(--ink);
+}
+
+/* ---------- Features (a grid of short headed paragraphs) ---------- */
+.art .lead {
+  margin-top: 18px;
+  color: var(--ink-2);
+  font-size: 18px;
+  max-width: 34ch;
+}
+.feature-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(26px, 3vw, 44px) clamp(24px, 3vw, 48px);
+}
+.art .body .feature-list {
+  padding: 0;
+  max-width: none;
+}
+.feature-list li {
+  padding-top: 16px;
+  border-top: 1px solid var(--line-2);
+  position: relative;
+}
+.feature-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -2px;
+  width: 18px;
+  height: 3px;
+  background: var(--accent);
+}
+.feature-list h3 {
+  font: 500 19px/1.3 var(--f);
+  color: var(--ink);
+}
+.feature-list p {
+  margin-top: 8px;
+  font-size: 16px !important;
+  line-height: 1.55 !important;
+}
+@media (max-width: 760px) {
+  .feature-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Spec (host requirements) on the dark surface ---------- */
+.art.spec .facts dt,
+.art.spec .facts dd {
+  border-bottom-color: var(--line);
+}
+.art.spec .facts dt {
+  color: var(--ink-3, rgb(239 239 237 / 0.56));
+}
+.art.spec .facts dd {
+  color: var(--ink);
+}
+.art .body .note {
+  margin-top: 20px;
+  font-size: 16px;
+}
+.art .body .note a,
+.art .body p a,
+.art .body li a {
+  color: var(--ink);
+  text-decoration-color: var(--accent);
+  text-underline-offset: 4px;
+}
+
+/* ---------- Games hub lists ---------- */
+.game-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: clamp(24px, 3vw, 48px);
+  border-top: 1px solid var(--line-2);
+}
+.art .body .game-list {
+  padding: 0;
+  max-width: none;
+}
+.game-list li {
+  display: grid;
+  gap: 4px;
+  padding: 14px 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.game-list .name {
+  font: 500 18px/1.3 var(--f);
+  color: var(--ink);
+}
+.game-list .name a {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 4px;
+}
+.game-list .meta {
+  font: 400 12px/1.5 var(--mono);
+  letter-spacing: 0.03em;
+  color: var(--ink-3, rgb(239 239 237 / 0.56));
+}
+@media (max-width: 680px) {
+  .game-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Article extras ---------- */
+.btn-row {
+  margin-top: 24px !important;
+}
+.btn-row .lpill {
+  display: inline-flex;
+}
+.proof-clip.pending {
+  background: linear-gradient(160deg, rgb(239 239 237 / 0.06), transparent 60%), #161616;
+}
+.proof-clip video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #0c0c0c;
+}
+
+/* ---------- Waitlist form states ---------- */
+/* Error text on the light strips that are not marked on-paper or on-grey. */
+.close .wl-err,
+.g-strip .wl-err {
+  color: #a3341b;
+}
+.hp {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.wl[aria-busy="true"] .lpill {
+  opacity: 0.6;
+  cursor: progress;
+}
+.wl-count {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 400 13px/1.4 var(--mono);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.wl-count::before {
+  content: "";
+  width: 18px;
+  height: 3px;
+  background: var(--accent-deep);
+  flex: none;
+}
+.close .wl-count::before,
+.on-paper .wl-count::before {
+  background: var(--accent-deep);
+}
+
+/* ---------- Waitlist status and invite page ---------- */
+.wl-status {
+  min-height: 72dvh;
+  padding: calc(var(--nav) + clamp(48px, 6vw, 88px)) var(--gut) clamp(56px, 7vw, 104px);
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+.wl-status h1 {
+  font: 300 clamp(34px, 4.4vw, 64px) / 1.04 var(--f);
+  letter-spacing: -0.02em;
+  max-width: 18ch;
+}
+.wl-status > p {
+  font-size: 19px;
+  color: var(--on-paper-2);
+  max-width: 52ch;
+}
+.wl-status [data-status-card] {
+  display: grid;
+  gap: 18px;
+  max-width: 720px;
+  margin-top: 10px;
+}
+.wl-status [data-status-card][hidden] {
+  display: none;
+}
+.wl-status .facts dd {
+  font: 300 clamp(28px, 3vw, 40px) / 1.1 var(--f);
+  font-variant-numeric: tabular-nums;
+}
+.wl-status h2 {
+  margin-top: 18px;
+  font: 500 22px/1.3 var(--f);
+}
+.share {
+  display: flex;
+  gap: 8px;
+}
+.share input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 44px;
+  padding: 0 18px;
+  border: 1px solid rgb(19 19 19 / 0.5);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--on-paper);
+  font: 400 15px/1 var(--mono);
+}
+.share-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.share-buttons a,
+.share-buttons button {
+  display: inline-flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 18px;
+  border: 1px solid rgb(19 19 19 / 0.45);
+  border-radius: 999px;
+  background: none;
+  color: var(--on-paper);
+  font: 500 14px/1 var(--f);
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.3s var(--ease), background-color 0.3s var(--ease);
+}
+.share-buttons a:hover,
+.share-buttons button:hover {
+  border-color: var(--accent-deep);
+  background: rgb(19 19 19 / 0.05);
+}
+.wl-status .note a {
+  color: var(--on-paper-2);
+  font-size: 14px;
+}
+@media (max-width: 520px) {
+  .share {
+    flex-direction: column;
+  }
+}
+
+/* ---------- Footer: legal links that wait for the Impressum ---------- */
+.foot .todo {
+  color: var(--ink-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--line-2);
+}
+
+/* ---------- Single-purpose pages (404, confirm, leave) ---------- */
+.page-404 main,
+.page-action main {
+  min-height: 70dvh;
+}
+.page-action form {
+  margin-top: 24px;
+}
