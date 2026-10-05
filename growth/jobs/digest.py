@@ -62,7 +62,7 @@ def collect_facts(ctx: Any) -> dict[str, Any]:
         registry = read_json(engine.state_dir / "projects" / project.id / "site-registry.json", {}) or {}
         pages = registry.get("pages", {})
         today = ctx.now.astimezone(project.tz).date()
-        stats, why = analytics.waitlist_stats(project)
+        stats, why = analytics.signup_stats(project)
         goal = goal_report(stats, project.raw.get("goal", {}), today) if project.raw.get("goal") else None
         if goal is not None and stats is None:
             goal["status"] = why

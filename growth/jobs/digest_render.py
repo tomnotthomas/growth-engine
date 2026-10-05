@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
+FUNNEL = ("waitlist_form_view", "waitlist_submit", "waitlist_signup", "waitlist_confirmed", "referral_sent", "referral_joined")
+
 
 def render_markdown(facts: dict[str, Any], narrative: str, note: str) -> str:
     out = [f"# Growth digest, {facts['week']['from']} to {facts['week']['to']}", ""]
@@ -21,7 +23,12 @@ def render_markdown(facts: dict[str, Any], narrative: str, note: str) -> str:
         out += ["", f"## {p['name']}", ""]
         goal = p.get("goal")
         if goal:
-            out.append(f"- Goal ({goal['name']}): {goal.get('confirmed_total', 'n/a')} of {goal['target']}; {goal.get('status', '')}")
+            zone = f" in {goal['zone']}" if goal.get("zone") else ""
+            out.append(f"- Goal ({goal['name']}{zone}): {goal.get('confirmed_total', 'n/a')} of {goal['target']}; {goal.get('status', '')}")
+            if goal.get("outside_zone"):
+                out.append(f"- Confirmed outside the zone (not counted): {goal['outside_zone']}")
+            if goal.get("numbers_from"):
+                out.append(f"- Numbers from: {goal['numbers_from']}")
             if goal.get("needed_per_day") is not None:
                 out.append(f"- Needed per day: {goal['needed_per_day']}; last 7 days: {goal.get('avg_per_day_7')} per day")
             if goal.get("k_factor") is not None:
@@ -30,8 +37,10 @@ def render_markdown(facts: dict[str, Any], narrative: str, note: str) -> str:
                 out.append(f"  - {src['source']}: {src['confirmed']}")
         traffic = p["traffic"]
         if traffic.get("connected"):
-            share = f"; {traffic['focus_os']} share: {_share(traffic)}" if traffic.get("focus_os") else ""
-            out.append(f"- Pageviews (7 days): {traffic['pageviews_7d']}; visitors: {traffic['visitors_7d']}{share}")
+            out.append(f"- Pageviews (7 days): {traffic['pageviews_7d']}")
+            funnel = traffic.get("funnel_7d", {})
+            if funnel:
+                out.append("- Funnel (7 days): " + ", ".join(f"{name} {funnel.get(name, 0)}" for name in FUNNEL))
         else:
             out.append(f"- Traffic: not connected ({traffic.get('why')})")
         site = p["site"]
@@ -74,6 +83,8 @@ def _project(p: dict[str, Any], esc: Callable[[Any], str]) -> str:
     goal = p.get("goal")
     if goal:
         rows = [("Confirmed", goal.get("confirmed_total", "n/a")), ("Target", goal["target"])]
+        if goal.get("outside_zone"):
+            rows.append(("Outside the zone", goal["outside_zone"]))
         for key, label in (
             ("plan_to_date", "Plan to date"),
             ("needed_per_day", "Needed per day"),
@@ -86,7 +97,8 @@ def _project(p: dict[str, Any], esc: Callable[[Any], str]) -> str:
                 rows.append((label, goal[key]))
         stat = "".join(f'<div><dt>{esc(label)}</dt><dd class="num">{esc(value)}</dd></div>' for label, value in rows)
         tone = "ok" if goal.get("on_track") else "warn"
-        parts.append(f'<h3>{esc(goal["name"]).capitalize()}</h3><p class="status {tone}">{esc(goal.get("status", ""))}</p><dl class="stats">{stat}</dl>')
+        zone = f' in {esc(goal["zone"])}' if goal.get("zone") else ""
+        parts.append(f'<h3>{esc(goal["name"]).capitalize()}{zone}</h3><p class="status {tone}">{esc(goal.get("status", ""))}</p><dl class="stats">{stat}</dl>')
         if goal.get("series"):
             body = "".join(
                 f'<tr><td>{esc(r["date"])}</td><td class="num">{esc(r["confirmed"])}</td><td class="num">{esc(r["cumulative"])}</td><td class="num">{esc(r["plan"])}</td></tr>'
@@ -99,11 +111,12 @@ def _project(p: dict[str, Any], esc: Callable[[Any], str]) -> str:
     traffic = p["traffic"]
     if traffic.get("connected"):
         rows = "".join(f'<tr><td>{esc(r["path"])}</td><td class="num">{esc(r["views"])}</td></tr>' for r in traffic["top_pages"])
+        funnel = traffic.get("funnel_7d", {})
+        steps = "".join(f'<tr><td>{esc(name)}</td><td class="num">{esc(funnel.get(name, 0))}</td></tr>' for name in FUNNEL)
         parts.append(
-            f'<h3>Traffic, 7 days</h3><p><span class="num">{esc(traffic["pageviews_7d"])}</span> pageviews, '
-            f'<span class="num">{esc(traffic["visitors_7d"])}</span> visitors'
-            + (f', {esc(traffic["focus_os"])} share <span class="num">{esc(_share(traffic))}</span>' if traffic.get("focus_os") else "")
-            + f'</p><table><tr><th>Page</th><th class="num">Views</th></tr>{rows}</table>'
+            f'<h3>Traffic, 7 days</h3><p><span class="num">{esc(traffic["pageviews_7d"])}</span> pageviews.</p>'
+            f'<table><tr><th>Page</th><th class="num">Views</th></tr>{rows}</table>'
+            + (f'<h3>Sign-up funnel, 7 days</h3><table><tr><th>Step</th><th class="num">Events</th></tr>{steps}</table>' if funnel else "")
         )
     else:
         parts.append(f'<h3>Traffic</h3><p class="muted">Not connected: {esc(traffic.get("why"))}</p>')
@@ -133,9 +146,6 @@ def _project(p: dict[str, Any], esc: Callable[[Any], str]) -> str:
     parts.append("</section>")
     return "".join(parts)
 
-
-def _share(traffic: dict[str, Any]) -> Any:
-    return "n/a" if traffic.get("focus_os_share_7d") is None else traffic["focus_os_share_7d"]
 
 
 def _markdown_to_html(text: str, esc: Callable[[Any], str]) -> str:

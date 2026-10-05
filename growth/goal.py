@@ -8,6 +8,8 @@ Input is the waitlist Worker's /api/waitlist/stats answer. Definitions:
 - needed per day = what is left of the target divided by the goal days left (all of them before the start);
 - the average per day uses the last 7 days, or only the days since the start in the first week;
 - projection = confirmed so far + that average x the days left;
+- with a `zone` (country codes), only sign-ups from those countries count toward the goal; the rest
+  are reported as outside the zone, because the product can't serve them yet;
 - k-factor of a weekly cohort = confirmed sign-ups the cohort's members invited / cohort size. The
   headline k uses cohorts that are at least a week old, so their invites had time to arrive.
 """
@@ -18,6 +20,19 @@ from datetime import date, timedelta
 from typing import Any
 
 
+def in_zone(stats: dict[str, Any], zone: list[str]) -> tuple[dict[str, Any], int]:
+    """Only the rows from countries in `zone`, with the confirmed total recomputed; and how many were outside."""
+    if not zone:
+        return stats, 0
+    wanted = {code.upper() for code in zone}
+    days = [row for row in stats.get("days", []) if str(row.get("country", "")).upper() in wanted]
+    outside = sum(int(row.get("confirmed", 0)) for row in stats.get("days", [])) - sum(int(row.get("confirmed", 0)) for row in days)
+    sources = [row for row in stats.get("sources", []) if str(row.get("country", "")).upper() in wanted]
+    totals = dict(stats.get("totals", {}))
+    totals["confirmed"] = sum(int(row.get("confirmed", 0)) for row in days)
+    return {**stats, "days": days, "sources": sources, "totals": totals}, outside
+
+
 def goal_report(stats: dict[str, Any] | None, goal: dict[str, Any], today: date) -> dict[str, Any]:
     target = int(goal.get("target", 0))
     days_total = int(goal.get("days", 0))
@@ -25,6 +40,12 @@ def goal_report(stats: dict[str, Any] | None, goal: dict[str, Any], today: date)
     if stats is None:
         report["status"] = "no data: the waitlist is not deployed or its stats endpoint is not configured"
         return report
+    report["numbers_from"] = stats.get("source_of_numbers", "waitlist ledger")
+    zone = [str(c) for c in goal.get("zone", [])]
+    stats, outside = in_zone(stats, zone)
+    if zone:
+        report["zone"] = ", ".join(c.upper() for c in zone)
+        report["outside_zone"] = outside
 
     per_day: dict[str, int] = {}
     referred_per_day: dict[str, int] = {}

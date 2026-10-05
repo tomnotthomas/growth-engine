@@ -148,14 +148,15 @@ class GoalClock(unittest.TestCase):
         self.assertEqual(report["projection"], 900 + 450 * 44)
 
 
-class TrafficShare(unittest.TestCase):
-    def test_no_pageviews_shows_the_share_as_not_available(self) -> None:
+class TrafficFunnel(unittest.TestCase):
+    def test_traffic_and_the_sign_up_funnel_come_from_the_facts(self) -> None:
         from growth.jobs.digest_render import render_html, render_markdown
         from growth.site.html import esc
 
+        funnel = {"waitlist_form_view": 120, "waitlist_submit": 40, "waitlist_confirmed": 31, "referral_sent": 9}
         project = {
             "name": "Kiln",
-            "traffic": {"connected": True, "pageviews_7d": 0, "visitors_7d": 0, "focus_os": "Mac OS X", "focus_os_share_7d": None, "top_pages": []},
+            "traffic": {"connected": True, "pageviews_7d": 0, "top_pages": [], "funnel_7d": funnel},
             "site": {"pages": 3, "indexable": 0, "last_build": "never", "public": False},
             "reddit_drafts_waiting": 0,
             "jobs": {},
@@ -165,10 +166,9 @@ class TrafficShare(unittest.TestCase):
         facts = {"week": {"from": "2026-09-28", "to": "2026-10-05"}, "ai": {"runs_7d": 0, "budget_per_week": 10}, "projects": [project]}
         markdown = render_markdown(facts, "", "")
         html = render_html(facts, "", "", esc)
-        self.assertIn("Mac OS X share: n/a", markdown)
-        self.assertIn('share <span class="num">n/a</span>', html)
+        self.assertIn("waitlist_form_view 120, waitlist_submit 40, waitlist_signup 0, waitlist_confirmed 31", markdown)
+        self.assertIn('<td>referral_sent</td><td class="num">9</td>', html)
         self.assertNotIn("None", markdown + html)
-
 
 class ClaudeBudgetRows(HomeTestCase):
     def _runner(self, **changes):
