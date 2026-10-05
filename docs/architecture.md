@@ -62,9 +62,11 @@ collection data, live data, `measurements.toml`, `media.toml` and the theme's `t
 
 Section types: `hero`, `intro`, `tiles`, `proof`, `steps`, `features`, `spec`, `faq`, `article`
 (paragraphs, h3, lists, tables, buttons, "last checked"), `close`, `item-hero`, `item-strip`,
-`listing`, `waitlist-status`. Copy may use `**bold**`, `[text](href)` and `~` for a non-breaking space.
+`listing`, `waitlist-status`, `game-search` (searches every checked item in the browser from
+`/data/<collection>-<lang>.json`; no match offers the waitlist form) and `hardware-check`. Copy may use `**bold**`, `[text](href)` and `~` for a non-breaking space.
 Links can point at `page:<id>`, `item:<collection>/<slug>`, `app:` and `legal:privacy`. Placeholders
-are `{brand}`, `{app_url}`, `{year}`, `{move_up}` and `{checked}`, and on item pages every field of the
+are `{brand}`, `{app_url}`, `{year}`, `{move_up}`, `{checked}`, `{legal.<key>}` and `{hardware.floor}` /
+`{hardware.models}`, and on item pages every field of the
 item. A value of `"@field"` takes the item's field (for example `body = "@why"` with a `fallback`).
 
 Rules enforced at load time: every link resolves, every placeholder is known, the brand is never
@@ -83,6 +85,9 @@ Rules enforced at build time:
   Remote images are refused. Game footage must be an own recording of a publisher in
   `[rules] footage_publishers`. CSS may only reference `data:` URIs and fonts. Data-source fields
   outside `keep_fields` (such as store art URLs) never reach the cache.
+- **Legal pages:** a project with a waitlist refuses to build while its legal-notice or privacy page
+  is unset or uses an empty `[legal]` value, so no sign-up form ever goes out without them.
+- **Languages:** only `live_languages` are built and linked; the others stay ready.
 - **Numbers:** measured values need `source` and `measured_at`. JSON-LD never carries ratings or
   reviews.
 - **Structured data:** `Organization` and `WebSite` everywhere, `BreadcrumbList` with crumbs,
@@ -99,13 +104,22 @@ confirmation link opens a one-button page, so mail scanners that only `GET` link
 SHA-256 hashes of the confirm and status tokens are stored. A confirmed user gets a public invite code
 (`/r/<code>`) and a private status link. Position = sign-up order minus `move_up_per_referral` per
 confirmed invite, capped at `max_credited_referrals`. The live counter shows only real numbers, and
-only from `counter_min` on. Abuse limits: a honeypot field, `signups_per_ip_hour` per hashed IP, and at
-most one mail a day to an existing address. Every mail carries a one-click leave link that deletes the
+only from `counter_min` on. Abuse limits: a honeypot field, `signups_per_ip_hour` per hashed IP, and
+at most three mails a day (ten minutes apart) to one address. Players and hosts get their own
+status page and mails. The country comes from Cloudflare's geolocation and is stored without the IP. Every mail carries a one-click leave link that deletes the
 row and recounts the inviter's credited invites. `/api/waitlist/stats` (Bearer `STATS_TOKEN`) feeds the digest.
+
+Analytics, when `[analytics] provider = "posthog"`: the page script sends a short list of events
+(page view, form view, submit, referral sent, game search) to the Worker's `/api/e`, which drops
+every property not on its list and relays them to PostHog without IP, cookies or a person profile.
+The Worker adds the server-side events (sign-up, confirmed, referral joined). The digest reads PostHog
+with the personal key from the environment and falls back to the Worker stats, then the local ledger.
 
 ## The digest's goal tracker
 
 `goal.py` reads the stats. Confirmed sign-ups per day against a linear plan over the `days` days from
 `[goal] start` (the deadline is the last of them), what is needed per day from now on, a projection
 from the last 7 days (only the days since the start in the first week), sign-ups by source, and the referral **k-factor**: for weekly cohorts at least two weeks old, the confirmed
-sign-ups the cohort's members invited, divided by the cohort's size. Before the start the status says when the goal starts.
+sign-ups the cohort's members invited, divided by the cohort's size. With `[goal] zone` set, only
+sign-ups from those countries count toward the goal; the rest are shown apart. Before the start the
+status says when the goal starts.
