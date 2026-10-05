@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 from . import net
 
 SIGNUP_ROWS = 50000
+# The PostHog project also holds the app's events; bound the scan instead of reading its whole history.
+SIGNUP_DAYS = 365
 
 
 def traffic(project: Any) -> dict[str, Any]:
@@ -81,6 +83,7 @@ def posthog_signup_stats(project: Any) -> tuple[dict[str, Any] | None, str]:
             key,
             "SELECT toDate(timestamp) AS d, properties.role AS role, properties.country AS country, properties.channel AS channel, "
             "count() AS n, countIf(properties.referred = true) AS referred FROM events WHERE event = 'waitlist_confirmed' "
+            f"AND timestamp > now() - INTERVAL {SIGNUP_DAYS} DAY "
             f"AND properties.site = '{_quote(project.id)}' GROUP BY d, role, country, channel ORDER BY d LIMIT {SIGNUP_ROWS}",
         )
     except Exception as exc:  # report, never guess

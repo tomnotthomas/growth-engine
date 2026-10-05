@@ -66,6 +66,17 @@ class SiteBuild(HomeTestCase):
             self.assertIn(why, str(caught.exception))
             self.edit("projects/example/project.toml", f'out = "example"\nlive_languages = {live}', 'out = "example"')
 
+    def test_a_list_entry_in_the_wrong_section_fails_check_even_in_a_language_that_is_not_live(self) -> None:
+        self.edit("projects/example/project.toml", 'out = "example"', 'out = "example"\nlive_languages = ["en"]')
+        self.edit(
+            "projects/example/pages/landing.toml",
+            'items = [{ q = "Was kostet {brand}?", a = "In der Beta nichts." }]',
+            'items = [{ icon = "mail", h = "Anmelden", p = "Trag dich ein." }]',
+        )
+        with self.assertRaises(ConfigError) as caught:
+            self.engine()
+        self.assertIn("(faq): items[0] needs 'q', 'a'", str(caught.exception))
+
     def test_game_search_data_lists_running_blocked_and_native_items_with_links(self) -> None:
         self.build()
         rows = json.loads((self.public / "data" / "plugins-en.json").read_text())
@@ -172,6 +183,7 @@ class StatsSource(HomeTestCase):
         self.assertEqual(stats["totals"]["confirmed"], 0)
         self.assertIn("properties.site = 'example'", sent[0])
         self.assertIn(f"LIMIT {analytics.SIGNUP_ROWS}", sent[0])
+        self.assertIn(f"timestamp > now() - INTERVAL {analytics.SIGNUP_DAYS} DAY", sent[0])
 
     def test_posthog_rows_at_the_limit_are_not_used(self) -> None:
         project = self._posthog_project()
