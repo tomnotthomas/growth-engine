@@ -341,7 +341,11 @@
     })[0];
     var verdict = model ? "fits" : has(config.rules.not_yet) ? "not_yet" : has(config.rules.not_host) ? "not_host" : has(config.rules.family) ? "below" : "";
     if (!verdict) return;
-    var shown = name.replace(/^ANGLE \(/, "").replace(/\(0x[0-9a-f]+\).*$/i, "").split(",").slice(-1)[0].trim();
+    // "ANGLE (Vendor, Model (0x…) Direct3D11 …, D3D11)", "ANGLE (Apple, ANGLE Metal Renderer: Apple M2,
+    // Unspecified Version)", Firefox's "…, or similar": keep only the part that names the model
+    var parts = name.replace(/,\s*or similar$/i, "").replace(/^ANGLE \((.*)\)$/, "$1")
+      .replace(/\s+\(.*$/, "").replace(/\s+Direct3D.*$/i, "").split(",");
+    var shown = parts[parts.length > 1 ? 1 : 0].replace(/^.*Renderer:\s*/, "").trim();
     box.querySelector("[data-hw-line]").textContent = config.messages[verdict].split("{model}").join(model || shown);
     box.classList.add("hw-" + verdict);
     box.hidden = false;
