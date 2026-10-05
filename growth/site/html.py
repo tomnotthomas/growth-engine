@@ -7,15 +7,27 @@ unit ("2~€"). Everything else is escaped, so config text can never inject mark
 from __future__ import annotations
 
 import html
+import json
 import re
-from typing import Callable
+from typing import Any, Callable
 
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
 _LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+SAFE_HREF = ("/", "#", "https:", "mailto:")
 
 
 def esc(text: object) -> str:
     return html.escape(str(text), quote=True)
+
+
+def safe_href(href: str) -> bool:
+    return href.startswith(SAFE_HREF) and not href.startswith("//")
+
+
+def script_json(data: Any, indent: int | None = None) -> str:
+    """JSON that can sit inside a <script> element without ending it or opening markup."""
+    text = json.dumps(data, ensure_ascii=False, indent=indent)
+    return text.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
 def inline(text: str, resolve: Callable[[str], str] | None = None) -> str:
@@ -26,6 +38,8 @@ def inline(text: str, resolve: Callable[[str], str] | None = None) -> str:
         href = match.group(2)
         if resolve:
             href = resolve(href)
+        if not safe_href(href):
+            raise ValueError(f"link {match.group(2)!r}: only /, #, https:, mailto: or page:, item:, app:, legal: links")
         links.append(f'<a href="{esc(href)}">{esc(match.group(1))}</a>')
         return f"\x00{len(links) - 1}\x00"
 

@@ -64,13 +64,14 @@ export function makeHandler(config, deps = {}) {
       if (!recently(existing.mail_sent_at, 24 * 3600e3)) {
         if (existing.confirmed_at) {
           const s = token();
-          await env.DB.prepare("UPDATE signups SET status_hash = ?, mail_sent_at = ? WHERE id = ?").bind(await hash(s), stamp, existing.id).run();
+          await env.DB.prepare("UPDATE signups SET status_hash = ? WHERE id = ?").bind(await hash(s), existing.id).run();
           await mail(env, existing.lang, existing.email, "again", { status_url: statusUrl({}, existing.lang, s), leave_url: leaveUrl(s, existing.lang) });
         } else {
           const t = token();
-          await env.DB.prepare("UPDATE signups SET confirm_hash = ?, mail_sent_at = ? WHERE id = ?").bind(await hash(t), stamp, existing.id).run();
+          await env.DB.prepare("UPDATE signups SET confirm_hash = ? WHERE id = ?").bind(await hash(t), existing.id).run();
           await mail(env, existing.lang, existing.email, "confirm", { confirm_url: confirmUrl(t, existing.lang) });
         }
+        await env.DB.prepare("UPDATE signups SET mail_sent_at = ? WHERE id = ?").bind(stamp, existing.id).run();
       }
       return reply(wantsJson, 202, { ok: true }, statusUrl({ sent: 1 }, lang));
     }
@@ -81,11 +82,12 @@ export function makeHandler(config, deps = {}) {
     const source = referrer ? "referral" : classify(String(body.src || ""), String(body.from || ""));
     const t = token();
     await env.DB.prepare(
-      "INSERT INTO signups (email, role, lang, code, confirm_hash, referred_by, source, page, created_at, mail_sent_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO signups (email, role, lang, code, confirm_hash, referred_by, source, page, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-      .bind(email, role, lang, await freeCode(env), await hash(t), referrer ? referrer.id : null, source, String(body.page || "").slice(0, 60), stamp, stamp)
+      .bind(email, role, lang, await freeCode(env), await hash(t), referrer ? referrer.id : null, source, String(body.page || "").slice(0, 60), stamp)
       .run();
     await mail(env, lang, email, "confirm", { confirm_url: confirmUrl(t, lang) });
+    await env.DB.prepare("UPDATE signups SET mail_sent_at = ? WHERE email = ?").bind(stamp, email).run();
     return reply(wantsJson, 202, { ok: true }, statusUrl({ sent: 1 }, lang));
   }
 
@@ -97,9 +99,10 @@ export function makeHandler(config, deps = {}) {
     if (!row) return reply(wantsJson, 404, { error: "unknown or used link" }, statusUrl({ e: "expired" }));
     const s = token();
     const stamp = now().toISOString();
-    await env.DB.prepare("UPDATE signups SET confirmed_at = ?, confirm_hash = NULL, status_hash = ? WHERE id = ? AND confirmed_at IS NULL")
+    const done = await env.DB.prepare("UPDATE signups SET confirmed_at = ?, confirm_hash = NULL, status_hash = ? WHERE id = ? AND confirmed_at IS NULL")
       .bind(stamp, await hash(s), row.id)
       .run();
+    if (!done.meta.changes) return reply(wantsJson, 404, { error: "unknown or used link" }, statusUrl({ e: "expired" }));
     if (row.referred_by) await creditReferrer(env, row.referred_by);
     const position = await positionOf(env, row.id, row.role);
     await mail(env, row.lang, row.email, "welcome", {
@@ -119,9 +122,9 @@ export function makeHandler(config, deps = {}) {
     await env.DB.prepare("UPDATE signups SET referrals = referrals + 1 WHERE id = ?").bind(id).run();
     if (config.movedUpMail && !recently(ref.moved_up_mail_at, 24 * 3600e3)) {
       const position = await positionOf(env, ref.id, ref.role);
-      await env.DB.prepare("UPDATE signups SET moved_up_mail_at = ? WHERE id = ?").bind(now().toISOString(), ref.id).run();
       // No status link here: only the owner's own mails carry their private token.
       await mail(env, ref.lang, ref.email, "movedup", { position, invite_url: inviteUrl(ref.code), move_up: config.moveUpPerReferral });
+      await env.DB.prepare("UPDATE signups SET moved_up_mail_at = ? WHERE id = ?").bind(now().toISOString(), ref.id).run();
     }
   }
 
@@ -188,7 +191,17 @@ export function makeHandler(config, deps = {}) {
   async function leave(request, env) {
     const body = Object.fromEntries(await request.formData());
     const s = String(body.s || "");
-    if (TOKEN.test(s)) await env.DB.prepare("DELETE FROM signups WHERE status_hash = ?").bind(await hash(s)).run();
+    const row = TOKEN.test(s) ? await env.DB.prepare("SELECT id, referred_by FROM signups WHERE status_hash = ?").bind(await hash(s)).first() : null;
+    if (row) {
+      await env.DB.prepare("DELETE FROM signups WHERE id = ?").bind(row.id).run();
+      if (row.referred_by) {
+        await env.DB.prepare(
+          "UPDATE signups SET referrals = MIN(?, (SELECT COUNT(*) FROM signups f WHERE f.referred_by = ? AND f.confirmed_at IS NOT NULL)) WHERE id = ?",
+        )
+          .bind(config.maxCreditedReferrals, row.referred_by, row.referred_by)
+          .run();
+      }
+    }
     return Response.redirect(absolute(statusUrl({ left: 1 })), 303);
   }
 

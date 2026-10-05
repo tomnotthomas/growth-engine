@@ -30,7 +30,7 @@ def render_markdown(facts: dict[str, Any], narrative: str, note: str) -> str:
                 out.append(f"  - {src['source']}: {src['confirmed']}")
         traffic = p["traffic"]
         if traffic.get("connected"):
-            share = f"; {traffic['focus_os']} share: {traffic['focus_os_share_7d']}" if traffic.get("focus_os") else ""
+            share = f"; {traffic['focus_os']} share: {_share(traffic)}" if traffic.get("focus_os") else ""
             out.append(f"- Pageviews (7 days): {traffic['pageviews_7d']}; visitors: {traffic['visitors_7d']}{share}")
         else:
             out.append(f"- Traffic: not connected ({traffic.get('why')})")
@@ -102,7 +102,7 @@ def _project(p: dict[str, Any], esc: Callable[[Any], str]) -> str:
         parts.append(
             f'<h3>Traffic, 7 days</h3><p><span class="num">{esc(traffic["pageviews_7d"])}</span> pageviews, '
             f'<span class="num">{esc(traffic["visitors_7d"])}</span> visitors'
-            + (f', {esc(traffic["focus_os"])} share <span class="num">{esc(traffic["focus_os_share_7d"])}</span>' if traffic.get("focus_os") else "")
+            + (f', {esc(traffic["focus_os"])} share <span class="num">{esc(_share(traffic))}</span>' if traffic.get("focus_os") else "")
             + f'</p><table><tr><th>Page</th><th class="num">Views</th></tr>{rows}</table>'
         )
     else:
@@ -132,6 +132,10 @@ def _project(p: dict[str, Any], esc: Callable[[Any], str]) -> str:
     parts.append("<h3>Needs attention</h3>" + (f'<ul class="trouble">{"".join(trouble)}</ul>' if trouble else '<p class="muted">Nothing failed or was blocked.</p>'))
     parts.append("</section>")
     return "".join(parts)
+
+
+def _share(traffic: dict[str, Any]) -> Any:
+    return "n/a" if traffic.get("focus_os_share_7d") is None else traffic["focus_os_share_7d"]
 
 
 def _markdown_to_html(text: str, esc: Callable[[Any], str]) -> str:

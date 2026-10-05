@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from unittest import mock
 
 from growth.config import ConfigError, default_home, load_engine
@@ -31,6 +32,12 @@ class LoadExample(HomeTestCase):
         with self.assertRaises(ConfigError) as caught:
             load_engine(self.tmp / "nowhere")
         self.assertIn("GROWTH_HOME", str(caught.exception))
+
+    def test_relative_state_dir_from_the_environment_lives_in_the_home(self) -> None:
+        with mock.patch.dict(os.environ, {"GROWTH_STATE_DIR": "elsewhere/state"}):
+            self.assertEqual(load_engine(self.home).state_dir, self.home.resolve() / "elsewhere" / "state")
+        with mock.patch.dict(os.environ, {"GROWTH_STATE_DIR": "~/growth-state"}):
+            self.assertEqual(load_engine(self.home).state_dir, Path("~/growth-state").expanduser())
 
     def test_disabled_project_is_skipped(self) -> None:
         self.edit("projects/example/project.toml", "enabled = true", "enabled = false")
@@ -70,6 +77,18 @@ class Rejects(HomeTestCase):
     def test_job_on_a_channel_that_is_off(self) -> None:
         self.append("projects/example/project.toml", '[jobs.ping]\nkind = "indexnow"\nschedule = "daily 05:00"\nkey = "abcdefgh12"\n')
         self.assertRejected("needs channel 'indexnow' enabled")
+
+    def test_switched_off_job_on_a_channel_that_is_off(self) -> None:
+        self.only_core_jobs()
+        self.edit("projects/example/project.toml", "[channels.directory-submit]\nenabled = true", "[channels.directory-submit]\nenabled = false")
+        self.assertRejected("needs channel 'directory-submit' enabled")
+
+    def test_ai_args_that_need_a_paid_key(self) -> None:
+        self.edit("engine.toml", "extra_args = []", 'extra_args = ["--max-budget-usd=5"]')
+        self.assertRejected("may not contain --max-budget-usd=5")
+        self.edit("engine.toml", 'extra_args = ["--max-budget-usd=5"]', "extra_args = []")
+        self.edit("engine.toml", 'command = ["claude"]', 'command = ["claude", "--bare"]')
+        self.assertRejected("may not contain --bare")
 
     def test_bad_schedule(self) -> None:
         self.edit("projects/example/project.toml", 'schedule = "every 6h"', 'schedule = "every 1m"')

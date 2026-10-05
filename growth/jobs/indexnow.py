@@ -22,21 +22,20 @@ def run(ctx: Any) -> str:
     project = ctx.project
     key = str(ctx.job.params["key"])
     base = project.site["base_url"]
-    listing = read_json(ctx.state_dir / "changed-urls.json", {}) or {}
-    pending = []
-    for entry in listing.get("urls", []):
-        effect = f"indexnow:{entry['path']}:{entry['hash']}"
-        state = ctx.store.effect_begin(ctx.scope, effect, "indexnow", "ping", retry_failed=True)
-        if state == "go":
-            pending.append((effect, base + entry["path"]))
-        elif state == "pending":
-            ctx.notes.append(f"{entry['path']}: an earlier ping never reported back; not repeated")
-    if not pending:
-        return "nothing new to ping"
     host = urlparse(base).hostname
+    urls = (read_json(ctx.state_dir / "changed-urls.json", {}) or {}).get("urls", [])
     sent = 0
-    for start in range(0, len(pending), BATCH):
-        batch = pending[start : start + BATCH]
+    for start in range(0, len(urls), BATCH):
+        batch = []
+        for entry in urls[start : start + BATCH]:
+            effect = f"indexnow:{entry['path']}:{entry['hash']}"
+            state = ctx.store.effect_begin(ctx.scope, effect, "indexnow", "ping", retry_failed=True)
+            if state == "go":
+                batch.append((effect, base + entry["path"]))
+            elif state == "pending":
+                ctx.notes.append(f"{entry['path']}: an earlier ping never reported back; not repeated")
+        if not batch:
+            continue
         action = Action(channel="indexnow", kind="ping", url=ENDPOINT, target=host or "")
         try:
             ctx.check(action)
@@ -56,4 +55,4 @@ def run(ctx: Any) -> str:
         for effect, _ in batch:
             ctx.store.effect_end(ctx.scope, effect, "done", "")
         sent += len(batch)
-    return f"pinged {sent} URLs"
+    return f"pinged {sent} URLs" if sent else "nothing new to ping"

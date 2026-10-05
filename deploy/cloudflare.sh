@@ -22,6 +22,8 @@ from pathlib import Path
 from growth.config import load_engine
 engine = load_engine(Path(sys.argv[1]))
 project = engine.projects[sys.argv[2]]
+if "waitlist" in project.raw and project.raw["waitlist"].get("email_provider", "log") == "log":
+    sys.exit("[waitlist] email_provider is 'log' (local development only); set it to 'brevo' or 'resend' before deploying")
 print(engine.dist_dir / project.site.get("out", project.id))
 PY
 )"

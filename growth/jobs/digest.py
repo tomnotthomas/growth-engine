@@ -93,28 +93,51 @@ def _directories(state_dir: Any) -> dict[str, Any] | None:
     return summary(entries) if entries else None
 
 
+SCALES = {
+    "k": 1e3,
+    "thousand": 1e3,
+    "tsd": 1e3,
+    "tausend": 1e3,
+    "m": 1e6,
+    "million": 1e6,
+    "millionen": 1e6,
+    "mio": 1e6,
+    "bn": 1e9,
+    "billion": 1e9,
+    "mrd": 1e9,
+    "milliarden": 1e9,
+}
+_NUMBER_IN_TEXT = re.compile(
+    r"(?<![\w.])(\d[\d.,]*)(?:\s*(%|(?:" + "|".join(sorted(SCALES, key=len, reverse=True)) + r")\b\.?))?", re.I
+)
+
+
+def _canon(value: float) -> str:
+    return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
 def invented_numbers(text: str, facts: dict[str, Any]) -> list[str]:
-    """Numbers in `text` that the facts do not contain (small counts and years are allowed)."""
+    """Numbers in `text` that the facts do not contain (small counts and years without a unit are allowed)."""
     known = set()
-    for match in re.finditer(r"-?\d+(?:\.\d+)?", json.dumps(facts)):
-        value = match.group(0)
-        known.add(value)
-        if "." in value:
-            known.add(value.rstrip("0").rstrip("."))
-            known.add(str(round(float(value) * 100, 1)).rstrip("0").rstrip("."))  # shares written as percent
+    for match in re.finditer(r"\d+(?:\.\d+)?", json.dumps(facts)):
+        value = float(match.group(0))
+        known.add(_canon(value))
+        if "." in match.group(0):
+            known.add(_canon(round(value * 100, 1)))  # shares written as percent
     bad = []
-    for match in re.finditer(r"(?<![\w.])\d[\d.,]*", text):
-        raw = match.group(0).rstrip(".,")
-        norm = raw.replace(",", "").replace(".", "") if re.fullmatch(r"\d{1,3}([.,]\d{3})+", raw) else raw.replace(",", ".")
-        if norm in known:
-            continue
+    for match in _NUMBER_IN_TEXT.finditer(text):
+        raw = match.group(1).rstrip(".,")
+        unit = (match.group(2) or "").lower().rstrip(".")
+        norm = raw.replace(",", "").replace(".", "") if re.fullmatch(r"[1-9]\d{0,2}([.,]\d{3})+", raw) else raw.replace(",", ".")
         try:
             number = float(norm)
         except ValueError:
             continue
-        if number <= 12 or 2000 <= number <= 2100:
+        if _canon(number * SCALES.get(unit, 1)) in known:
             continue
-        bad.append(raw)
+        if not unit and (number <= 12 or 2000 <= number <= 2100):
+            continue
+        bad.append(match.group(0).strip())
     return bad
 
 

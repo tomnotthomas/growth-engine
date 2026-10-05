@@ -26,7 +26,7 @@ from ..policy import PolicyViolation, check_media
 from ..util import parse_duration, parse_iso, read_json, read_toml, sha256, write_atomic, write_json
 from .data import LiveData, load_media, load_measurements, resolve_items
 from .html import esc
-from .render import PageRenderer, Rendered, SiteContext
+from .render import LASTMOD, PageRenderer, Rendered, SiteContext
 from .spec import load_pages
 
 ENGINE_ASSETS = Path(__file__).resolve().parent.parent / "assets"
@@ -119,6 +119,10 @@ def build_site(project: Any, state_dir: Path, dist_root: Path, *, now: datetime)
             for lang in page.langs:
                 rendered.append(PageRenderer(ctx, page, lang).render())
 
+    changed = _update_registry(registry, rendered, items, today)
+    for page in rendered:
+        page.html = page.html.replace(LASTMOD, registry["pages"][page.path]["lastmod"])
+
     out = dist_root / project.site.get("out", project.id)
     tmp = out.with_name(f".{out.name}.build-{os.getpid()}")
     shutil.rmtree(tmp, ignore_errors=True)
@@ -138,7 +142,11 @@ def build_site(project: Any, state_dir: Path, dist_root: Path, *, now: datetime)
                 shutil.copytree(src, public / folder, dirs_exist_ok=True)
         _copy_media(project, media, ctx.media_used, public)
         _check_references(public, media, project)
-        _write_robots_and_sitemap(project, rendered, registry, public, today)
+        _write_robots_and_sitemap(project, rendered, registry, public)
+        for job in project.jobs.values():
+            if job.kind == "indexnow":
+                key = str(job.params["key"])
+                write_atomic(public / f"{key}.txt", key)
         _write_404(project, ui, public, ctx.asset_version)
         if project.raw.get("waitlist"):
             from ..waitlist.bundle import write_bundle
@@ -149,7 +157,6 @@ def build_site(project: Any, state_dir: Path, dist_root: Path, *, now: datetime)
         shutil.rmtree(tmp, ignore_errors=True)
         raise
 
-    changed = _update_registry(registry, rendered, items, today)
     write_json(state_dir / "site-registry.json", registry)
     notes = [f"{len(rendered)} pages, {sum(p.indexable for p in rendered)} indexable"]
     if not ctx.site_indexable:
@@ -198,27 +205,20 @@ def _check_references(public: Path, media: dict[str, Any], project: Any) -> None
         raise PolicyViolation("own-footage-only", f"site.css: url({ref}) must be a data: URI or a font")
 
 
-def _write_robots_and_sitemap(project: Any, rendered: list[Rendered], registry: dict[str, Any], public: Path, today: date) -> None:
+def _write_robots_and_sitemap(project: Any, rendered: list[Rendered], registry: dict[str, Any], public: Path) -> None:
     base = project.site["base_url"]
     if not project.site.get("indexable"):
         write_atomic(public / "robots.txt", "# Not public yet: nothing may be indexed.\nUser-agent: *\nDisallow: /\n")
         return
     write_atomic(public / "robots.txt", f"User-agent: *\nAllow: /\n\nSitemap: {base}/sitemap.xml\n")
-    known = registry.get("pages", {})
-    by_page: dict[str, list[Rendered]] = {}
-    for page in rendered:
-        by_page.setdefault(page.page_id + "|" + page.item_slug, []).append(page)
     urls = []
     for page in sorted(rendered, key=lambda p: p.path):
         if not page.sitemap:
             continue
-        lastmod = known.get(page.path, {}).get("lastmod", today.isoformat())
-        alts = ""
-        siblings = [p for p in by_page[page.page_id + "|" + page.item_slug] if p.sitemap]
-        if len(siblings) > 1:
-            alts = "".join(
-                f'\n    <xhtml:link rel="alternate" hreflang="{esc(s.lang)}" href="{esc(base + s.path)}"/>' for s in siblings
-            )
+        lastmod = registry["pages"][page.path]["lastmod"]
+        alts = "".join(
+            f'\n    <xhtml:link rel="alternate" hreflang="{esc(lang)}" href="{esc(base + path)}"/>' for lang, path in page.alternates.items()
+        )
         urls.append(f"  <url>\n    <loc>{esc(base + page.path)}</loc>\n    <lastmod>{lastmod}</lastmod>{alts}\n  </url>")
     write_atomic(
         public / "sitemap.xml",
@@ -257,7 +257,10 @@ def _update_registry(registry: dict[str, Any], rendered: list[Rendered], items: 
     pages = registry.setdefault("pages", {})
     changed = []
     for page in rendered:
-        digest = sha256(re.sub(r"\?v=[0-9a-f]+", "", page.html))
+        stable = re.sub(r"\?v=[0-9a-f]+", "", page.html)
+        for text in page.volatile:
+            stable = stable.replace(text, "")
+        digest = sha256(stable)
         entry = pages.get(page.path)
         if entry is None or entry.get("hash") != digest:
             pages[page.path] = {"hash": digest, "lastmod": today.isoformat(), "indexable": page.indexable}

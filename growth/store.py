@@ -151,6 +151,15 @@ class Store:
             (status, summary[:4000], iso(utcnow()), scope, job, slot),
         )
 
+    def release(self, scope: str, job: str, slot: str) -> None:
+        """Undo a claim whose job could not start (e.g. no AI), so the slot stays due."""
+        with self.tx() as db:
+            db.execute("DELETE FROM runs WHERE scope=? AND job=? AND slot=? AND attempts=1", (scope, job, slot))
+            db.execute(
+                "UPDATE runs SET status=?, attempts=attempts-1, finished_at=? WHERE scope=? AND job=? AND slot=?",
+                (FAILED, iso(utcnow()), scope, job, slot),
+            )
+
     def mark_missed(self, scope: str, job: str, slot: str, reason: str) -> bool:
         """Record a slot that will never run (too late, or no AI budget). False if it already had a row."""
         cur = self.db.execute(
@@ -180,6 +189,15 @@ class Store:
             "SELECT MAX(slot) AS s FROM runs WHERE scope=? AND job=? AND slot NOT LIKE 'manual:%'", (scope, job)
         ).fetchone()
         return row["s"] if row and row["s"] else None
+
+    def retryable_slots(self, scope: str, job: str, statuses: tuple[str, ...], max_attempts: int, since: str) -> list[str]:
+        marks = ",".join("?" * len(statuses))
+        rows = self.db.execute(
+            f"SELECT slot FROM runs WHERE scope=? AND job=? AND status IN ({marks}) AND attempts < ? AND slot >= ? "
+            "AND slot NOT LIKE 'manual:%'",
+            (scope, job, *statuses, max_attempts, since),
+        ).fetchall()
+        return [r["slot"] for r in rows]
 
     def runs_since(self, since: datetime, scope: str | None = None) -> list[Run]:
         query = "SELECT * FROM runs WHERE COALESCE(finished_at, started_at) >= ?"

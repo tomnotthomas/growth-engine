@@ -11,17 +11,16 @@ REPO = Path(__file__).resolve().parent.parent
 
 def tracked_and_new_files() -> list[str]:
     proc = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=REPO, capture_output=True, text=True
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=REPO, capture_output=True, text=True, check=True
     )
-    return proc.stdout.splitlines() if proc.returncode == 0 else []
+    files = proc.stdout.splitlines()
+    assert files, "git lists no files"
+    return files
 
 
 class PublicRepo(unittest.TestCase):
     def test_project_configs_live_only_in_the_example_home(self) -> None:
-        files = tracked_and_new_files()
-        if not files:
-            self.skipTest("not a git checkout")
-        for name in files:
+        for name in tracked_and_new_files():
             if name.rsplit("/", 1)[-1] in ("project.toml", "engine.toml"):
                 self.assertTrue(name.startswith("examples/home/"), f"{name}: real configs belong in the private engine home")
             self.assertFalse(name.startswith(("state/", "dist/", "home/")), name)

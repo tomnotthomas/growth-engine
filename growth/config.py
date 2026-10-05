@@ -22,6 +22,7 @@ from .util import parse_duration, read_toml
 
 ENGINE_SCOPE = "engine"
 CATCHUP = {"latest", "all", "skip"}
+FORBIDDEN_ARGS = ("--bare", "--max-budget-usd")
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _WINDOW = re.compile(r"^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$")
 
@@ -112,7 +113,7 @@ def load_engine(root: Path, *, state_dir: Path | None = None, dist_dir: Path | N
     raw = read_toml(root / "engine.toml")
     tz = _zone(raw.get("timezone", "UTC"), "engine.toml timezone", errors)
     env_state = os.environ.get("GROWTH_STATE_DIR")
-    state = state_dir or (Path(env_state) if env_state else root / raw.get("state_dir", "state"))
+    state = state_dir or root / Path(env_state or raw.get("state_dir", "state")).expanduser()
     dist = dist_dir or root / raw.get("dist_dir", "dist")
     ai = _ai(raw.get("ai", {}), errors)
     from .jobs import JOB_KINDS
@@ -175,11 +176,12 @@ def load_project(folder: Path) -> Project | None:
     site = dict(raw.get("site", {}))
     _check_site(site, where, errors)
 
+    channels = _channels(raw.get("channels", {}), where, errors)
     rules = ProjectRules(
         footage_publishers=frozenset(raw.get("rules", {}).get("footage_publishers", [])),
         accounts=_accounts(raw.get("channels", {}), where, errors),
+        channels=frozenset(cid for cid, conf in channels.items() if conf.get("enabled")),
     )
-    channels = _channels(raw.get("channels", {}), where, errors)
     data = dict(raw.get("data", {}))
     for sid, source in data.items():
         if source.get("kind") not in {"http-json", "file-json"}:
@@ -316,14 +318,14 @@ def _check_project_jobs(project: Project, where: str, errors: list[str]) -> None
         kind = JOB_KINDS[job.kind]
         if kind.scope == ENGINE_SCOPE:
             errors.append(f"{where}: jobs.{job.id}: kind {job.kind!r} runs once for the engine; configure it in engine.toml")
-        if not job.enabled:
-            continue
         if kind.channel and not project.channel_enabled(kind.channel):
             level = ch.CHANNELS[kind.channel].level
             errors.append(
                 f"{where}: jobs.{job.id}: needs channel {kind.channel!r} enabled (level {level}); "
                 "a job on a channel that may not run does not run at all"
             )
+        if not job.enabled:
+            continue
         if job.kind.startswith("directories-"):
             conf = project.raw.get("directories", {})
             if job.kind == "directories-draft" and not (project.root / str(conf.get("fact_sheet", ""))).is_file():
@@ -355,10 +357,14 @@ def _ai(raw: dict[str, Any], errors: list[str]) -> AIConfig:
     except ValueError as exc:
         errors.append(f"engine.toml [ai]: {exc}")
         timeout, cooldown = timedelta(minutes=20), timedelta(hours=5)
+    command = [str(c) for c in command]
+    extra_args = [str(a) for a in raw.get("extra_args", [])]
+    for arg in forbidden_args([*command, *extra_args]):
+        errors.append(f"engine.toml [ai]: command and extra_args may not contain {arg}: it needs a paid API key")
     per_project = raw.get("per_project_runs_per_week")
     return AIConfig(
-        command=[str(c) for c in command],
-        extra_args=[str(a) for a in raw.get("extra_args", [])],
+        command=command,
+        extra_args=extra_args,
         max_runs_per_day=int(raw.get("max_runs_per_day", 4)),
         max_runs_per_week=int(raw.get("max_runs_per_week", 12)),
         per_project_runs_per_week=int(per_project) if per_project is not None else None,
@@ -366,6 +372,10 @@ def _ai(raw: dict[str, Any], errors: list[str]) -> AIConfig:
         timeout=timeout,
         cooldown=cooldown,
     )
+
+
+def forbidden_args(args: list[str]) -> list[str]:
+    return [arg for arg in args if arg.split("=")[0] in FORBIDDEN_ARGS]
 
 
 def _zone(name: str, where: str, errors: list[str]) -> ZoneInfo:

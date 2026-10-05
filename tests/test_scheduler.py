@@ -11,6 +11,8 @@ from pathlib import Path
 from unittest import mock
 from zoneinfo import ZoneInfo
 
+from growth.ai import AIUnavailable
+from growth.cli import main
 from growth.config import load_engine
 from growth.policy import Action
 from growth.runner import EngineBusy, JobContext, engine_lock, run_now, tick
@@ -32,6 +34,22 @@ def count_job(ctx: JobContext) -> str:
 def failing_job(ctx: JobContext) -> str:
     CALLS.append("fail")
     raise RuntimeError("boom")
+
+
+def no_ai_job(ctx: JobContext) -> str:
+    CALLS.append("no-ai")
+    raise AIUnavailable("daily AI budget used")
+
+
+FLAKY: list[datetime] = []
+
+
+def flaky_job(ctx: JobContext) -> str:
+    CALLS.append(iso(ctx.slot))
+    if ctx.slot in FLAKY:
+        FLAKY.remove(ctx.slot)
+        raise RuntimeError("flaky")
+    return "ok"
 
 
 def _tick_in_process(home: str, now: str, out: str) -> None:
@@ -249,16 +267,16 @@ class SideEffects(HomeTestCase):
     def test_an_effect_happens_once_per_key(self) -> None:
         ctx = self._ctx()
         done: list[int] = []
-        action = Action(channel="indexnow", kind="ping", url="https://api.indexnow.org/indexnow")
+        action = Action(channel="website", kind="publish", url="https://kiln.example/a")
         self.assertEqual(ctx.act(action, "ping:/a:1", lambda: done.append(1)), "done")
         self.assertEqual(ctx.act(action, "ping:/a:1", lambda: done.append(1)), "already")
         self.assertEqual(done, [1])
 
     def test_an_effect_with_unknown_outcome_is_never_repeated(self) -> None:
         ctx = self._ctx()
-        ctx.store.effect_begin("example", "ping:/b:1", "indexnow", "ping", retry_failed=True)  # power cut after this
+        ctx.store.effect_begin("example", "ping:/b:1", "website", "publish", retry_failed=True)  # power cut after this
         done: list[int] = []
-        action = Action(channel="indexnow", kind="ping", url="https://api.indexnow.org/indexnow")
+        action = Action(channel="website", kind="publish", url="https://kiln.example/a")
         self.assertEqual(ctx.act(action, "ping:/b:1", lambda: done.append(1)), "unknown")
         self.assertEqual(done, [])
         self.assertTrue(ctx.notes)
@@ -280,11 +298,14 @@ class AIBudget(HomeTestCase):
         self.only_core_jobs()
         self.monday = datetime(2026, 10, 5, 3, 31, tzinfo=timezone.utc)  # 05:31 Berlin, just after the digest slot
 
-    def test_digest_waits_outside_the_ai_window(self) -> None:
+    def test_digest_outside_the_ai_window_goes_out_without_ai(self) -> None:
         engine = self.engine(window=(time(1, 0), time(2, 0)))
         report = tick(engine, now=self.monday)
-        self.assertTrue(any("weekly-digest" in d and "outside the AI window" in d for d in report.deferred))
-        self.assertFalse(any("weekly-digest" in r for r in report.ran))
+        self.assertFalse(report.deferred)
+        self.assertTrue(any("weekly-digest" in r for r in report.ran))
+        store = self.store(engine)
+        run = store.run("engine", "weekly-digest", iso(parse_schedule("weekly mon 05:30").latest(self.monday, BERLIN)))
+        self.assertIn("written without AI: outside the AI window", run.summary)
 
     def test_digest_runs_once_inside_budget(self) -> None:
         engine = self.engine()
@@ -299,7 +320,13 @@ class AIBudget(HomeTestCase):
         self.assertIn('"keys": []', calls[0])  # no API key reached Claude
         self.assertNotIn("--bare", calls[0])
 
-    def test_daily_cap_defers_then_misses(self) -> None:
+    def test_daily_cap_defers_then_misses_a_job_that_needs_ai(self) -> None:
+        import growth.jobs as jobs
+        from dataclasses import replace
+
+        saved = dict(jobs.JOB_KINDS)
+        self.addCleanup(lambda: jobs.JOB_KINDS.update(saved))
+        jobs.JOB_KINDS["digest"] = replace(jobs.JOB_KINDS["digest"], ai="required")
         engine = self.engine(max_runs_per_day=0)
         report = tick(engine, now=self.monday)
         self.assertTrue(any("daily AI budget used" in d for d in report.deferred))
@@ -321,3 +348,66 @@ class AIBudget(HomeTestCase):
         reason = Budget(engine.ai, store, engine.tz).blocked_reason(datetime.now(timezone.utc))
         self.assertIn("cooling down", reason or "")
 
+
+
+class Outcomes(HomeTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.only_core_jobs()
+        CALLS.clear()
+        FLAKY.clear()
+        import growth.jobs as jobs
+
+        self.saved = dict(jobs.JOB_KINDS)
+        self.addCleanup(lambda: jobs.JOB_KINDS.update(self.saved))
+        self.jobs = jobs
+
+    def _kind(self, name: str, **changes) -> None:
+        from dataclasses import replace
+
+        self.jobs.JOB_KINDS[name] = replace(self.jobs.JOB_KINDS[name], **changes)
+
+    def test_a_switched_off_job_is_never_run_by_hand(self) -> None:
+        engine = self.engine()
+        with self.assertRaises(KeyError):
+            run_now(engine, "example", "directories-submit", now=NOW)
+        self.assertEqual(self.store(engine).runs_since(NOW - timedelta(days=1)), [])
+
+    def test_failed_runs_are_reported_apart_and_fail_the_tick_command(self) -> None:
+        self._kind("fetch-data", target="tests.test_scheduler:failing_job", idempotent=False)
+        self._kind("build-site", target="tests.test_scheduler:count_job")
+        engine = self.engine()
+        report = tick(engine, now=NOW)
+        self.assertEqual([r.split("@")[0] for r in report.ran], ["example/build-site"])
+        self.assertEqual([f.split("@")[0] for f in report.failed], ["example/fetch-data"])
+        self.assertTrue(any(line.startswith("failed example/fetch-data") for line in report.lines()))
+        with mock.patch("growth.cli.tick", return_value=report), mock.patch("builtins.print"):
+            self.assertEqual(main(["--home", str(self.home), "tick"]), 1)
+
+    def test_a_job_without_ai_budget_is_deferred_and_its_slot_stays_due(self) -> None:
+        self._kind("fetch-data", target="tests.test_scheduler:no_ai_job", idempotent=False)
+        self._kind("build-site", target="tests.test_scheduler:count_job")
+        engine = self.engine()
+        slot = parse_schedule("every 6h").latest(NOW, BERLIN)
+        first = tick(engine, now=NOW)
+        self.assertIn(f"example/fetch-data@{iso(slot)}", first.deferred)
+        self.assertFalse(first.failed)
+        self.assertIsNone(self.store(engine).run("example", "fetch-data", iso(slot)))
+        tick(engine, now=NOW + timedelta(minutes=5))
+        self.assertEqual(CALLS.count("no-ai"), 2)
+
+    def test_catchup_all_retries_an_earlier_failed_slot_after_a_later_one_ran(self) -> None:
+        self.edit("projects/example/project.toml", 'schedule = "every 6h"', 'schedule = "every 6h"\ncatchup = "all"\nmax_late = "1d"')
+        self._kind("fetch-data", target="tests.test_scheduler:flaky_job")
+        self._kind("build-site", target="tests.test_scheduler:count_job")
+        engine = self.engine()
+        every = parse_schedule("every 6h")
+        first, later = every.latest(NOW + timedelta(hours=6), BERLIN), every.latest(NOW + timedelta(hours=12), BERLIN)
+        FLAKY.append(first)
+        tick(engine, now=NOW)
+        tick(engine, now=NOW + timedelta(hours=12))
+        store = self.store(engine)
+        self.assertEqual(store.run("example", "fetch-data", iso(first)).status, FAILED)
+        self.assertEqual(store.run("example", "fetch-data", iso(later)).status, OK)
+        tick(engine, now=NOW + timedelta(hours=12, minutes=5))
+        self.assertEqual(store.run("example", "fetch-data", iso(first)).status, OK)

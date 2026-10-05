@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .budget import Budget
-from .config import AIConfig
+from .config import AIConfig, forbidden_args
 from .store import Store
 from .util import utcnow
 
@@ -29,7 +29,6 @@ PAID_ENV = (
     "CLAUDE_CODE_USE_FOUNDRY",
     "AWS_BEARER_TOKEN_BEDROCK",
 )
-FORBIDDEN_ARGS = ("--bare", "--max-budget-usd")
 _LIMIT = re.compile(r"usage limit|rate limit|limit reached|limit will reset|out of extra usage|429", re.I)
 
 
@@ -55,9 +54,8 @@ def subscription_env(base: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def build_command(cfg: AIConfig, system: str | None) -> list[str]:
-    for arg in cfg.extra_args:
-        if arg in FORBIDDEN_ARGS:
-            raise ValueError(f"[ai] extra_args may not contain {arg}: it needs a paid API key")
+    for arg in forbidden_args([*cfg.command, *cfg.extra_args]):
+        raise ValueError(f"[ai] command and extra_args may not contain {arg}: it needs a paid API key")
     cmd = [*cfg.command, "-p", "--output-format", "json", "--tools", "", "--no-session-persistence"]
     if system:
         cmd += ["--append-system-prompt", system]
@@ -81,37 +79,42 @@ class ClaudeRunner:
         reason = self.budget.blocked_reason(now, self.scope)
         if reason:
             raise AIUnavailable(reason)
+        cmd = build_command(self.cfg, system)
         row = self.store.ai_started(self.scope, self.job)
+        ok, limited, detail = False, False, "ended without a result"
         try:
-            proc = subprocess.run(
-                build_command(self.cfg, system),
-                input=prompt,
-                capture_output=True,
-                text=True,
-                timeout=self.cfg.timeout.total_seconds(),
-                env=subscription_env(),
-                cwd=self.workdir,
-            )
-        except subprocess.TimeoutExpired:
-            self.store.ai_finished(row, ok=False, limited=False, detail="timed out")
-            raise AIFailed(f"claude -p ran longer than {self.cfg.timeout}") from None
-        except OSError as exc:
-            self.store.ai_finished(row, ok=False, limited=False, detail=str(exc))
-            raise AIFailed(f"could not start {self.cfg.command[0]}: {exc}") from None
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    input=prompt,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.cfg.timeout.total_seconds(),
+                    env=subscription_env(),
+                    cwd=self.workdir,
+                )
+            except subprocess.TimeoutExpired:
+                detail = "timed out"
+                raise AIFailed(f"claude -p ran longer than {self.cfg.timeout}") from None
+            except OSError as exc:
+                detail = str(exc)
+                raise AIFailed(f"could not start {self.cfg.command[0]}: {exc}") from None
 
-        out = proc.stdout.strip()
-        try:
-            data = json.loads(out) if out else {}
-        except json.JSONDecodeError:
-            data = {"result": out, "is_error": proc.returncode != 0}
-        text = str(data.get("result", "") or "")
-        failed = proc.returncode != 0 or bool(data.get("is_error"))
-        if failed and _LIMIT.search(text + "\n" + proc.stderr):
-            until = self.budget.start_cooldown(utcnow())
-            self.store.ai_finished(row, ok=False, limited=True, detail=(text or proc.stderr)[:500])
-            raise AIUnavailable(f"Claude usage limit reached; no AI runs until {until}")
-        if failed or not text.strip():
-            self.store.ai_finished(row, ok=False, limited=False, detail=(text or proc.stderr)[:500])
-            raise AIFailed(f"claude -p failed (exit {proc.returncode}): {(text or proc.stderr)[:300]}")
-        self.store.ai_finished(row, ok=True, limited=False, detail=f"{len(text)} chars")
-        return AIResult(text=text, raw=data)
+            out = proc.stdout.strip()
+            try:
+                data = json.loads(out) if out else {}
+            except json.JSONDecodeError:
+                data = {"result": out, "is_error": proc.returncode != 0}
+            text = str(data.get("result", "") or "")
+            failed = proc.returncode != 0 or bool(data.get("is_error"))
+            detail = (text or proc.stderr)[:500]
+            if failed and _LIMIT.search(text + "\n" + proc.stderr):
+                limited = True
+                until = self.budget.start_cooldown(utcnow())
+                raise AIUnavailable(f"Claude usage limit reached; no AI runs until {until}")
+            if failed or not text.strip():
+                raise AIFailed(f"claude -p failed (exit {proc.returncode}): {(text or proc.stderr)[:300]}")
+            ok, detail = True, f"{len(text)} chars"
+            return AIResult(text=text, raw=data)
+        finally:
+            self.store.ai_finished(row, ok=ok, limited=limited, detail=detail)

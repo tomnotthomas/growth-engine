@@ -37,8 +37,9 @@ tools, text only.
 
 Budget (in `engine.toml`, `[ai]`): at most 3 headless runs a day and 10 a week across all projects,
 4 a week per project, started only between 01:00 and 07:00, and a 5-hour cooldown after Claude reports
-a usage limit. Today the only AI job is the weekly digest (1 run a week). A job that has no budget is
-retried on later ticks and recorded as missed, with the reason, once it is too late.
+a usage limit. A job that needs AI (the launch-directory drafts) and has no budget is retried on
+later ticks and recorded as missed, with the reason, once it is too late. The weekly digest only uses
+AI for its narrative: without budget it goes out on time with the fact tables alone.
 
 ## 3. Scheduler
 
@@ -56,7 +57,8 @@ lingering, so it runs without a login session. It writes `~/.config/growth-engin
 | `<PROJECT>_STATS_TOKEN` (name set in the project's `[waitlist] stats_token_env`) | the digest's goal tracker reads the Worker's stats |
 | PostHog personal API key (name set in `[analytics] api_key_env`) | traffic in the digest |
 
-Logs: `journalctl --user -u growth-engine.service`. Status: `python3 -m growth status`.
+Logs: `journalctl --user -u growth-engine.service`. Status: `python3 -m growth status`. `tick` exits
+non-zero when a job failed, so `systemctl --user status growth-engine.service` shows the failure.
 
 **Cron instead of systemd:** `*/5 * * * * cd ~/growth-engine && GROWTH_HOME=~/growth-home python3 -m growth tick >> ~/growth-home/tick.log 2>&1`.
 The guarantees are the same, because they live in the engine, not in the timer.

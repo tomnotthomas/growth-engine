@@ -30,13 +30,14 @@ projects/<id>/
 | `[goal]` | `name`, `target`, `days`, `start` (the launch date) |
 | `[analytics]` | `provider` (`none` or `posthog`), `host`, `project_id`, `api_key_env`, `focus_os` |
 | `[directories]` | `source` (URL or a file in the project), `audience_terms`, `regions`, `exclude_terms`, `fact_sheet`, `voice`, `draft_batch`, `submit` (verified sites), `launch_date` (default: `[goal] start`) |
-| `[jobs.<id>]` | `kind`, `schedule`, `enabled`, `catchup` (`latest`, `all` or `skip`), `max_late`, `max_attempts`, plus kind parameters (`key` for indexnow) |
+| `[[site]]` in the `submit` file | `id` (catalogue id: host without `www.` plus path), `method` (`api` or `form`), `endpoint` (https, on the same site), `fields`, `captcha = false`, `account = false`, `terms_url`, `terms_checked` (YYYY-MM-DD), `terms_allow_automation` (default false; only the boolean `true` allows automatic submission) |
+| `[jobs.<id>]` | `kind`, `schedule`, `enabled`, `catchup` (`latest`, `all` or `skip`), `max_late`, `max_attempts`, plus kind parameters (`key` for indexnow; the build publishes it as `/<key>.txt`) |
 
 ## Curated collection items
 
 | Field | Meaning |
 |---|---|
-| `slug`, `name`, `short` | URL part, display name, short name for headings |
+| `slug`, `name`, `short` | URL part (lower-case letters and digits joined by single dashes), display name, short name for headings |
 | `status` | `playable`, `blocked` (needs `reason`), `native`, `unchecked` |
 | `native_version` | `none` to be eligible for a page; anything else means a native version exists |
 | `searches`, `wave`, `page` | demand, page wave, `page = false` to never generate one |

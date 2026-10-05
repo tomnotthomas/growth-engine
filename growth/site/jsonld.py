@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ..policy import check_jsonld_types
+from .html import script_json
 
 
 def graph(nodes: list[dict[str, Any]]) -> str:
@@ -13,9 +13,7 @@ def graph(nodes: list[dict[str, Any]]) -> str:
     for node in nodes:
         _collect_types(node, types)
     check_jsonld_types(types)
-    data = {"@context": "https://schema.org", "@graph": nodes}
-    text = json.dumps(data, ensure_ascii=False, indent=1)
-    return text.replace("</", "<\\/")  # never close the script tag from inside the data
+    return script_json({"@context": "https://schema.org", "@graph": nodes}, indent=1)
 
 
 def organization(name: str, url: str) -> dict[str, Any]:

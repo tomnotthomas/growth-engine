@@ -33,14 +33,11 @@ from .store import FAILED, INTERRUPTED, OK, Store
 from .util import iso, parse_iso, utcnow
 
 log = logging.getLogger("growth")
+DEFERRED = "deferred"
 
 
 class EngineBusy(Exception):
     pass
-
-
-class JobDeferred(Exception):
-    """The job could not start now (e.g. no AI budget); its slot stays due."""
 
 
 @contextmanager
@@ -131,12 +128,14 @@ def _no_rules():
 @dataclass
 class TickReport:
     ran: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
     missed: list[str] = field(default_factory=list)
     deferred: list[str] = field(default_factory=list)
     interrupted: list[str] = field(default_factory=list)
 
     def lines(self) -> list[str]:
         out = [f"ran {r}" for r in self.ran]
+        out += [f"failed {f}" for f in self.failed]
         out += [f"missed {m}" for m in self.missed]
         out += [f"deferred {d}" for d in self.deferred]
         out += [f"interrupted {i}" for i in self.interrupted]
@@ -187,11 +186,11 @@ def _tick_job(
     else:
         due = job.schedule.slots(parse_iso(last), now, tz)
     retry = (FAILED, INTERRUPTED) if kind.idempotent else ()
-    # Earlier slots may still be retried (an idempotent job that failed last tick).
+    # Earlier slots may still be retried (an idempotent job that failed): the last one, or with
+    # catch-up "all" every one that is not too late yet.
     if last is not None and retry:
-        prev = store.run(scope, job.id, last)
-        if prev and prev.status in retry and prev.attempts < job.max_attempts:
-            due = [parse_iso(last), *due]
+        since = iso(now - job.max_late) if job.catchup == "all" else last
+        due = sorted({*(parse_iso(s) for s in store.retryable_slots(scope, job.id, retry, job.max_attempts, since)), *due})
 
     if job.catchup == "latest" and len(due) > 1:
         for slot in due[:-1]:
@@ -203,22 +202,27 @@ def _tick_job(
         label = f"{scope}/{job.id}@{iso(slot)}"
         if now - slot > job.max_late or (job.catchup == "skip" and now - slot > timedelta(minutes=15)):
             reason = f"too late to run ({now - slot} after its slot)"
-            if kind.ai:
+            if kind.ai == "required":
                 why = budget.blocked_reason(now, scope)
                 reason += f"; AI was unavailable: {why}" if why else ""
             existing = store.run(scope, job.id, iso(slot))
             if existing is None and store.mark_missed(scope, job.id, iso(slot), reason):
                 report.missed.append(label)
             continue
-        if kind.ai:
+        if kind.ai == "required":
             why = budget.blocked_reason(now, scope)
             if why:
                 report.deferred.append(f"{label}: {why}")
                 continue
         if not store.claim(scope, job.id, iso(slot), retry=retry, max_attempts=job.max_attempts):
             continue
-        _execute(engine, store, budget, project, job, slot, now)
-        report.ran.append(label)
+        status = _execute(engine, store, budget, project, job, slot, now)
+        if status == OK:
+            report.ran.append(label)
+        elif status == DEFERRED:
+            report.deferred.append(label)
+        else:
+            report.failed.append(label)
 
 
 def run_now(engine: Engine, scope: str, job_id: str, *, now: datetime | None = None) -> str:
@@ -231,6 +235,8 @@ def run_now(engine: Engine, scope: str, job_id: str, *, now: datetime | None = N
     if job_id not in jobs:
         raise KeyError(f"{scope} has no job {job_id!r}")
     job = jobs[job_id]
+    if not job.enabled:
+        raise KeyError(f"{scope}/{job_id} is switched off (enabled = false)")
     slot = now.replace(microsecond=0)
     with engine_lock(engine.state_dir):
         store = Store(engine.state_dir / "engine.db")
@@ -268,8 +274,9 @@ def _execute(
         log.info("%s/%s ok: %s", scope, job.id, summary)
         return OK
     except AIUnavailable as exc:
-        store.finish(scope, job.id, key, FAILED, f"AI unavailable: {exc}")
-        return FAILED
+        store.release(scope, job.id, key)
+        log.info("%s/%s deferred: AI unavailable: %s", scope, job.id, exc)
+        return DEFERRED
     except PolicyViolation as exc:
         store.finish(scope, job.id, key, FAILED, f"blocked by policy: {exc}")
         log.warning("%s/%s blocked: %s", scope, job.id, exc)

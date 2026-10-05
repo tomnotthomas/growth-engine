@@ -67,7 +67,13 @@ class Statement {
 function setup(overrides = {}) {
   const sent = [];
   const env = { DB: new D1(), STATS_TOKEN: "stats-secret", HASH_SALT: "salt", ...overrides.env };
-  const handle = makeHandler({ ...CONFIG, ...overrides.config }, { sendMail: async (_env, mail) => sent.push(mail) });
+  let down = false;
+  const handle = makeHandler({ ...CONFIG, ...overrides.config }, {
+    sendMail: async (_env, mail) => {
+      if (down) throw new Error("mail provider answered 503");
+      sent.push(mail);
+    },
+  });
   let ip = 0;
   const call = (path, init = {}) => {
     const headers = new Headers(init.headers || {});
@@ -84,7 +90,7 @@ function setup(overrides = {}) {
     const res = await confirm(tokenFrom(mail, "t"));
     return new URL(res.headers.get("location")).hash.slice(3);
   };
-  return { env, sent, call, signup, confirm, join, tokenFrom };
+  return { env, sent, call, signup, confirm, join, tokenFrom, mailDown: (value) => (down = value) };
 }
 
 const row = (env, email) => env.DB.db.prepare("SELECT * FROM signups WHERE email = ?").get(email);
@@ -193,6 +199,58 @@ test("invite links redirect with the code, and leaving deletes the address", asy
   const left = await call("/api/waitlist/leave", { method: "POST", body: new URLSearchParams({ s: secret }) });
   assert.equal(left.status, 303);
   assert.equal(row(env, "c@example.org"), undefined);
+});
+
+test("a failed mail can be retried right away instead of being throttled for a day", async () => {
+  const { env, sent, signup, confirm, tokenFrom, mailDown } = setup();
+  mailDown(true);
+  assert.equal((await signup({ email: "retry@example.org" })).status, 500);
+  assert.equal((await signup({ email: "retry@example.org" })).status, 500);
+  mailDown(false);
+  await signup({ email: "retry@example.org" });
+  assert.equal(sent.filter((m) => m.to === "retry@example.org").length, 1, "the confirmation goes out");
+  await confirm(tokenFrom(sent.at(-1), "t"));
+  env.DB.db.prepare("UPDATE signups SET mail_sent_at = NULL WHERE email = ?").run("retry@example.org");
+  mailDown(true);
+  assert.equal((await signup({ email: "retry@example.org" })).status, 500);
+  mailDown(false);
+  await signup({ email: "retry@example.org" });
+  assert.ok(sent.at(-1).subject.startsWith("again"), "a confirmed address gets its links again");
+});
+
+test("confirming twice at once credits the inviter once and sends one welcome mail", async () => {
+  const { env, sent, join, signup, confirm, tokenFrom } = setup();
+  await join("inviter@example.org");
+  await signup({ email: "twice@example.org", ref: row(env, "inviter@example.org").code });
+  const t = tokenFrom(sent.at(-1), "t");
+  const [a, b] = await Promise.all([confirm(t), confirm(t)]);
+  assert.deepEqual([a.status, b.status], [303, 303]);
+  assert.equal([a, b].filter((r) => /e=expired/.test(r.headers.get("location"))).length, 1);
+  assert.equal(row(env, "inviter@example.org").referrals, 1);
+  assert.equal(sent.filter((m) => m.to === "twice@example.org" && m.subject.startsWith("welcome")).length, 1);
+});
+
+test("leaving and joining again through the same invite does not credit the inviter twice", async () => {
+  const { env, join, call } = setup();
+  await join("inviter@example.org");
+  const code = row(env, "inviter@example.org").code;
+  const s = await join("friend@example.org", code);
+  assert.equal(row(env, "inviter@example.org").referrals, 1);
+  await call("/api/waitlist/leave", { method: "POST", body: new URLSearchParams({ s }) });
+  assert.equal(row(env, "inviter@example.org").referrals, 0);
+  await join("friend@example.org", code);
+  assert.equal(row(env, "inviter@example.org").referrals, 1);
+});
+
+test("an uncredited referral over the cap leaving keeps the inviter at the cap", async () => {
+  const { env, join, call } = setup({ config: { maxCreditedReferrals: 1 } });
+  await join("inviter@example.org");
+  const code = row(env, "inviter@example.org").code;
+  await join("f1@example.org", code);
+  const s = await join("f2@example.org", code);
+  assert.equal(row(env, "inviter@example.org").referrals, 1);
+  await call("/api/waitlist/leave", { method: "POST", body: new URLSearchParams({ s }) });
+  assert.equal(row(env, "inviter@example.org").referrals, 1);
 });
 
 test("sources are classified without storing the full referrer", () => {

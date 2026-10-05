@@ -4,8 +4,8 @@ The curated file holds what a person checked once (status and reason, Mac versio
 search volume, page wave). The live data source says what the product offers right now. Rules from
 project.toml decide which items get a page and which pages may be indexed:
 
-- a page only for a playable item that is live (or had a page before: status changes keep the URL),
-  has enough search demand, is in an enabled wave and has no Mac version;
+- a page only for a playable item that is live, has enough search demand, is in an enabled wave and
+  has no Mac version; an item that had a page keeps its URL whatever its status becomes;
 - the page stays noindex until it has the evidence its template asks for (a clip or measured numbers);
 - live items without a curated record are only listed when the project trusts the live list.
 """
@@ -45,6 +45,15 @@ class Item:
     @property
     def free(self) -> bool:
         return bool(self.record.get("free"))
+
+    @property
+    def native(self) -> bool:
+        return self.status == "native" or self.record.get("native_version", "none") != "none"
+
+    @property
+    def offered(self) -> bool:
+        """Live, playable and without a native version: what the item page was made for."""
+        return self.live and self.status == "playable" and not self.native
 
 
 def load_measurements(project_root: Path, rel: str | None) -> dict[str, dict[str, Any]]:
@@ -158,12 +167,12 @@ def resolve_items(
 def _page_rule(item: Item, conf: dict[str, Any], published: dict[str, Any], min_searches: int, max_wave: int) -> tuple[bool, str]:
     if item.record.get("page") is False:
         return False, "page switched off in the curated file"
-    if item.status != "playable":
-        return False, f"status {item.status}"
-    if item.record.get("native_version", "none") != "none":
-        return False, "has a Mac version"
     if item.slug in published:
         return True, ""  # status changes keep the URL
+    if item.status != "playable":
+        return False, f"status {item.status}"
+    if item.native:
+        return False, "has a Mac version"
     if conf.get("require_live", True) and not item.live:
         return False, "not in the live playable list"
     if int(item.record.get("searches", 0)) < min_searches:

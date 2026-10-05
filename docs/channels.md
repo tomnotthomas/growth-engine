@@ -52,7 +52,11 @@ refused, logged as blocked and reported in the weekly digest.
     number the data doesn't.
 12. Solving captchas or creating accounts automatically.
 13. Submitting anywhere whose terms were not checked to allow it (each verified site records
-    `terms_url` and `terms_checked`).
+    `terms_url`, `terms_checked` as YYYY-MM-DD, and `terms_allow_automation = true`; anything but the
+    boolean `true`, including a missing value or the string `"true"`, is refused).
+14. Anything a channel's level does not allow: unknown channels are refused, off channels and channels the project did not
+    switch on never act,
+    the human queue only stores drafts, and no action other than a draft may reach a Reddit or forum host.
 
 ## Launch directories
 
@@ -60,6 +64,9 @@ refused, logged as blocked and reported in the weekly digest.
 project's catalogue and scores every entry for the project's audience. `directories-draft` writes each
 site's listing text from the project's fact sheet. `directories-submit` waits for launch day. Then it
 submits once to each site listed in the project's verified-submit file (an API or a plain form whose
-terms allow it, recorded with `captcha = false` and `account = false`), and marks every other drafted
-entry as skipped. Subreddits from the list stay in the owner's Reddit queue. The digest lists what was
-skipped.
+terms allow it, recorded with `terms_allow_automation = true`, `captcha = false` and `account = false`,
+posted to an https endpoint on the same site; a redirect counts as failure), and marks every other
+website entry as skipped with the reason: no draft, not verified, or refused. Skipped entries are
+checked again on every run, so a site added to the file later is submitted then. A failed attempt is
+not repeated. Entries are identified by host and path, so two lists on one site stay apart.
+Subreddits from the list stay in the owner's Reddit queue. The digest lists what was skipped.

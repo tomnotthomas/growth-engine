@@ -5,8 +5,11 @@ The source is a community list (by default mmccaff/PlacesToPostYourStartup, CC0)
 its state folder, so status survives re-imports:
 
     new -> drafted -> submitted | failed            (only entries verified for automatic submission)
-    new -> drafted -> skipped (needs a person)      (forms with accounts or captchas, unknown terms)
+    new | drafted -> skipped (needs a person)       (from launch day: no draft, not verified, or refused)
+    skipped -> drafted | submitted | failed         (re-checked on every run; skipped is never final)
     reddit                                           (subreddits: the owner's Reddit queue, never automated)
+
+An entry is identified by its host (without www.) and path, so two lists on one site stay apart.
 
 Scoring is deterministic and explained: audience terms in the name or URL, the project's regions
 (country domains), early-adopter sites (beta, launch, hunt), a backlink value for every public
@@ -51,9 +54,8 @@ class Entry:
 
 def entry_id(url: str) -> str:
     parsed = urlparse(url.lower())
-    host = (parsed.hostname or "").removeprefix("www.")
-    path = parsed.path.rstrip("/")
-    return host + path if host in {"reddit.com", "old.reddit.com"} else host
+    host = (parsed.hostname or "").rstrip(".").removeprefix("www.")
+    return host + parsed.path.rstrip("/") if host else ""
 
 
 def parse_list(markdown: str) -> list[Entry]:
@@ -79,6 +81,8 @@ def score(entry: Entry, profile: dict[str, Any]) -> Entry:
     text = f"{entry.name} {entry.url}".lower()
     host = urlparse(entry.url).hostname or ""
     points, reasons, value = 0, [], []
+    if entry.status == "excluded":
+        entry.status = "drafted" if entry.listing else "new"
     if entry.section == "reddit":
         entry.status = "reddit" if entry.status in {"new", "reddit"} else entry.status
         value.append("community")
@@ -102,7 +106,8 @@ def score(entry: Entry, profile: dict[str, Any]) -> Entry:
         reasons.append("vendor sign-up or paid listing")
     for term in profile.get("exclude_terms", []):
         if term.lower() in text:
-            entry.status = "excluded"
+            if entry.status not in {"submitted", "failed"}:
+                entry.status = "excluded"
             reasons.append(f"excluded by '{term}'")
     entry.score, entry.reasons, entry.value = points, reasons, value
     return entry
@@ -114,7 +119,10 @@ def catalogue_path(state_dir: Path) -> Path:
 
 def load_catalogue(state_dir: Path) -> dict[str, Entry]:
     raw = read_json(catalogue_path(state_dir), {}) or {}
-    return {eid: Entry(**data) for eid, data in raw.get("entries", {}).items()}
+    entries = [Entry(**data) for data in raw.get("entries", {}).values()]
+    for entry in entries:
+        entry.id = entry_id(entry.url)
+    return {entry.id: entry for entry in entries}
 
 
 def save_catalogue(state_dir: Path, entries: dict[str, Entry], source: str, imported: str) -> None:

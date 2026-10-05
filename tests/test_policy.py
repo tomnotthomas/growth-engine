@@ -5,7 +5,8 @@ from __future__ import annotations
 
 import re
 import unittest
-from datetime import timedelta
+from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 
 from growth import channels as ch
@@ -46,6 +47,10 @@ class NeverAutomate(unittest.TestCase):
         for channel in ("reddit", "forums"):
             for kind in ("post", "comment", "vote", "dm"):
                 self.assertBlocked("no-scripted-community-posting", Action(channel=channel, kind=kind, in_reply_to="x"))
+        self.assertBlocked("no-scripted-community-posting", Action(channel="reddit", kind="publish"))
+        for url in ("https://www.reddit.com/api/submit", "https://oauth.reddit.com./api/comment", "https://www.computerbase.de/forum/"):
+            self.assertBlocked("no-scripted-community-posting", Action(channel="directory-submit", kind="submit", url=url))
+        check_action(Action(channel="reddit", kind="draft", url="https://www.reddit.com/r/x/comments/1"), RULES, no_texts)
 
     def test_one_account_per_platform(self) -> None:
         self.assertBlocked("one-account-per-platform", Action(channel="reddit", kind="draft", account="u/second"))
@@ -93,8 +98,9 @@ class NeverAutomate(unittest.TestCase):
         self.assertBlocked("no-paid-boost-of-game-footage", Action(channel="paid-ads", kind="ad", media=(ours,)))
 
     def test_no_google_indexing_api(self) -> None:
-        url = "https://indexing.googleapis.com/v3/urlNotifications:publish"
-        self.assertBlocked("no-google-indexing-api", Action(channel="website", kind="ping", url=url))
+        for host in ("indexing.googleapis.com", "Indexing.GoogleAPIs.com."):
+            url = f"https://{host}/v3/urlNotifications:publish"
+            self.assertBlocked("no-google-indexing-api", Action(channel="website", kind="ping", url=url))
 
     def test_no_invented_numbers(self) -> None:
         self.assertBlocked(
@@ -114,16 +120,37 @@ class NeverAutomate(unittest.TestCase):
         self.assertBlocked("no-captcha-or-account-creation", Action(channel="directory-submit", kind="submit", meta=base))
 
     def test_terms_allow_automation(self) -> None:
-        self.assertBlocked("terms-allow-automation", Action(channel="directory-submit", kind="submit", meta={"captcha": False, "account": False}))
-        check_action(
-            Action(
-                channel="directory-submit",
-                kind="submit",
-                meta={"captcha": False, "account": False, "terms_url": "https://d.example/terms", "terms_checked": "2026-10-01"},
-            ),
-            RULES,
-            no_texts,
-        )
+        verified = {
+            "captcha": False,
+            "account": False,
+            "terms_url": "https://d.example/terms",
+            "terms_checked": "2026-10-01",
+            "terms_allow_automation": True,
+        }
+        check_action(Action(channel="directory-submit", kind="submit", meta=verified), RULES, no_texts)
+        check_action(Action(channel="directory-submit", kind="submit", meta={**verified, "terms_checked": date(2026, 10, 1)}), RULES, no_texts)
+        missing = {k: v for k, v in verified.items() if k != "terms_allow_automation"}
+        self.assertBlocked("terms-allow-automation", Action(channel="directory-submit", kind="submit", meta=missing))
+        for value in (False, "true", "yes", 1, None):
+            meta = {**verified, "terms_allow_automation": value}
+            self.assertBlocked("terms-allow-automation", Action(channel="directory-submit", kind="submit", meta=meta))
+        for key, value in (("terms_url", ""), ("terms_checked", ""), ("terms_checked", "1 Oct 2026"), ("terms_checked", "2026-13-01")):
+            meta = {**verified, key: value}
+            self.assertBlocked("terms-allow-automation", Action(channel="directory-submit", kind="submit", meta=meta))
+
+    def test_channel_level(self) -> None:
+        for channel, kind in (("forums", "draft"), ("comment-replies", "notify"), ("outreach-email", "publish"), ("directories", "publish")):
+            self.assertBlocked("channel-level", Action(channel=channel, kind=kind))
+        for channel in ("Reddit", "nowhere"):
+            with self.assertRaises(ValueError):
+                check_action(Action(channel=channel, kind="draft"), RULES, no_texts)
+        check_action(Action(channel="indexnow", kind="ping", url="https://api.indexnow.org/indexnow"), RULES, no_texts)
+        check_action(Action(channel="digest", kind="notify", url="https://hooks.example/x"), RULES, no_texts)
+        project = ProjectRules(channels=frozenset({"website"}))
+        with self.assertRaises(PolicyViolation) as caught:
+            check_action(Action(channel="indexnow", kind="ping", url="https://api.indexnow.org/indexnow"), project, no_texts)
+        self.assertEqual(caught.exception.rule, "channel-level")
+        check_action(Action(channel="website", kind="publish"), project, no_texts)
 
 
 class ChannelRegistry(unittest.TestCase):
@@ -146,7 +173,7 @@ class HumanQueue(HomeTestCase):
     def test_only_reddit_gets_drafts_and_never_the_same_text_twice(self) -> None:
         engine = self.engine()
         store = self.store(engine)
-        rules = engine.projects["example"].rules
+        rules = replace(engine.projects["example"].rules, channels=frozenset({"reddit"}))
         common = dict(thread_url="https://www.reddit.com/r/x/comments/1", title="Q", why="fits", now=NOW)
         with self.assertRaises(QueueRefused):
             add_draft(store, engine.state_dir, "example", rules, channel="forums", community="pcgh", text="hi", **common)

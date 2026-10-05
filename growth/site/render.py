@@ -7,7 +7,6 @@ status page, which still work as plain form posts without it.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -15,7 +14,7 @@ from typing import Any
 
 from . import jsonld
 from .data import Item, index_evidence
-from .html import attrs, esc, inline, plain
+from .html import attrs, esc, inline, plain, safe_href, script_json
 from .spec import PLACEHOLDER, PageLang, PageSpec
 
 ICONS = {
@@ -28,6 +27,7 @@ ICONS = {
 }
 PLUS = '<span class="pm" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></span>'
 ARROW = '<span class="lpill-c"><svg class="glyph" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg></span>'
+LASTMOD = "%%lastmod%%"
 MONTHS = {
     "de": ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"],
     "en": ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
@@ -49,8 +49,8 @@ class Rendered:
     html: str
     indexable: bool
     alternates: dict[str, str]
-    item_slug: str = ""
     sitemap: bool = True
+    volatile: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -84,6 +84,12 @@ class SiteContext:
         return spec.path.replace("{slug}", item.slug) if item else spec.path
 
     def href(self, ref: str, lang: str) -> str:
+        target = self._target(ref, lang)
+        if not safe_href(target):
+            raise ValueError(f"link {ref!r} resolves to {target!r}: only /, #, https: and mailto: targets")
+        return target
+
+    def _target(self, ref: str, lang: str) -> str:
         if ref.startswith("page:"):
             target, _, frag = ref[5:].partition("#")
             return self.path_of(target, lang) + (f"#{frag}" if frag else "")
@@ -119,12 +125,13 @@ class PageRenderer:
         self.faq: list[tuple[str, str]] = []
         self.videos: list[dict[str, Any]] = []
         self.has_waitlist = False
+        self.has_beta = False
         self.anchors: set[str] = set()
         self.role = "host" if page.nav == "host" else "player"
 
     # ---- text ------------------------------------------------------------------------------
 
-    def fill(self, text: str) -> str:
+    def fill(self, text: str, wrap: Any = str) -> str:
         values: dict[str, Any] = {
             "brand": self.ctx.project.brand["name"],
             "app_url": self.ctx.project.brand.get("app_url", ""),
@@ -145,7 +152,7 @@ class PageRenderer:
             key = match.group(1)
             if key not in values:
                 raise KeyError(f"{self.page.file.name}: no value for {{{key}}}")
-            return str(values[key])
+            return wrap(values[key])
 
         return PLACEHOLDER.sub(sub, text)
 
@@ -156,11 +163,19 @@ class PageRenderer:
         return value
 
     def md(self, text: str) -> str:
-        return inline(self.fill(text), lambda ref: self.ctx.href(ref, self.lang))
+        """Copy with markup; filled-in values are shown as they are, never read as markup."""
+        values: list[str] = []
+
+        def hold(value: Any) -> str:
+            values.append(esc(value))
+            return f"\x01{len(values) - 1}\x01"
+
+        out = inline(self.fill(text, hold), lambda ref: self.ctx.href(ref, self.lang))
+        return re.sub(r"\x01(\d+)\x01", lambda m: values[int(m.group(1))], out)
 
     def status_label(self) -> str:
         assert self.item is not None
-        key = "status_live" if self.item.live else "status_paused"
+        key = "status_live" if self.item.offered else "status_paused"
         return self.ctx.text(self.lang, key)
 
     # ---- page ------------------------------------------------------------------------------
@@ -182,9 +197,21 @@ class PageRenderer:
         return True
 
     def alternates(self) -> dict[str, str]:
-        if self.item:
-            return {self.lang: self.ctx.path_of(self.page.id, self.lang, self.item)}
-        return {lang: spec.path for lang, spec in self.page.langs.items()}
+        return {lang: self.ctx.path_of(self.page.id, lang, self.item) for lang in self.page.langs}
+
+    def hreflang(self, indexable: bool) -> dict[str, str]:
+        """The indexable language versions, plus x-default, when there is more than one."""
+        if not indexable:
+            return {}
+        found = {
+            lang: path
+            for lang, path in self.alternates().items()
+            if lang == self.lang or PageRenderer(self.ctx, self.page, lang, self.item).indexable()
+        }
+        if len(found) < 2:
+            return {}
+        default = found.get(self.ctx.project.default_language)
+        return {**found, "x-default": default} if default else found
 
     def render(self) -> Rendered:
         body = "\n".join(self.section(s, i) for i, s in enumerate(self.spec.sections))
@@ -214,20 +241,15 @@ class PageRenderer:
             path=path,
             html=doc,
             indexable=indexable,
-            alternates=self.alternates() if len(self.page.langs) > 1 and not self.item else {self.lang: path},
-            item_slug=self.item.slug if self.item else "",
+            alternates=self.hreflang(indexable),
             sitemap=self.page.in_sitemap and indexable,
+            volatile=[long_date(self.ctx.checked, self.lang)] if self.ctx.checked else [],
         )
 
     def head(self, path: str, indexable: bool) -> str:
         base = self.ctx.base
         title = plain(self.fill(self.spec.title))
-        description = self.spec.description
-        if self.item and self.item.record.get("description"):
-            description = str(self.item.record["description"])
-        if not indexable and self.spec.description_draft:
-            description = self.spec.description_draft
-        description = plain(self.fill(description))
+        description = self.description(indexable)
         og_title = plain(self.fill(self.spec.og_title or self.spec.title))
         og_desc = plain(self.fill(self.spec.og_description or description))
         share = self.ctx.project.site.get("share_image", "")
@@ -240,13 +262,8 @@ class PageRenderer:
         ]
         if not indexable:
             lines.append('<meta name="robots" content="noindex, follow">')
-        alternates = self.alternates() if not self.item else {}
-        if len(alternates) > 1:
-            for lang, alt in alternates.items():
-                lines.append(f'<link rel="alternate" hreflang="{esc(lang)}" href="{esc(base + alt)}">')
-            default = alternates.get(self.ctx.project.default_language)
-            if default:
-                lines.append(f'<link rel="alternate" hreflang="x-default" href="{esc(base + default)}">')
+        for lang, alt in self.hreflang(indexable).items():
+            lines.append(f'<link rel="alternate" hreflang="{esc(lang)}" href="{esc(base + alt)}">')
         lines += [
             f'<meta property="og:type" content="{"article" if self.page.kind in {"guide", "item"} else "website"}">',
             f'<meta property="og:title" content="{esc(og_title)}">',
@@ -267,17 +284,30 @@ class PageRenderer:
         lines.append(f'<script type="application/ld+json">\n{self.jsonld(path)}\n</script>')
         return "\n".join(lines)
 
+    def description(self, indexable: bool) -> str:
+        text = self.spec.description
+        if self.item and self.item.record.get("description"):
+            text = str(self.item.record["description"])
+        if not indexable and self.spec.description_draft:
+            text = self.spec.description_draft
+        return plain(self.fill(text))
+
+    def absolute(self, href: str) -> str | None:
+        if href.startswith("/") and not href.startswith("//"):
+            return self.ctx.base + href
+        return href if href.startswith("https:") else None
+
     def jsonld(self, path: str) -> str:
         base = self.ctx.base
         brand = str(self.ctx.project.brand["name"])
         nodes: list[dict[str, Any]] = [jsonld.organization(brand, base + "/"), jsonld.website(brand, base + "/", self.lang)]
         if self.spec.crumbs:
-            trail = [(plain(self.fill(c["text"])), base + self.ctx.href(c["href"], self.lang) if c.get("href") else None) for c in self.spec.crumbs]
+            trail = [(plain(self.fill(c["text"])), self.absolute(self.ctx.href(c["href"], self.lang)) if c.get("href") else None) for c in self.spec.crumbs]
             nodes.append(jsonld.breadcrumbs(trail))
         if self.faq:
             nodes.append(jsonld.faq(self.faq, self.lang))
         if self.page.kind in {"guide", "item"}:
-            modified = self.page.updated or (self.ctx.checked or self.ctx.today).isoformat()
+            modified = self.page.updated or LASTMOD
             nodes.append(jsonld.article(plain(self.fill(self.spec.title)), base + path, self.lang, modified, base + "/"))
         nodes += self.videos
         return jsonld.graph(nodes)
@@ -291,7 +321,7 @@ class PageRenderer:
         if "fragen" in self.anchors:
             links.append(f'<a href="#fragen">{esc(t("nav_faq"))}</a>')
         langs = ""
-        alternates = self.alternates() if not self.item else {}
+        alternates = self.alternates()
         if len(alternates) > 1:
             buttons = []
             for lang, alt in alternates.items():
@@ -299,8 +329,8 @@ class PageRenderer:
                 buttons.append(f'<a href="{esc(alt)}" hreflang="{esc(lang)}" lang="{esc(lang)}"{current}>{esc(lang.upper())}</a>')
             langs = f'<div class="lang" role="group" aria-label="{esc(t("lang_label"))}">{"".join(buttons)}</div>'
         cta_key = "host_cta" if self.role == "host" else "cta"
-        target = "#beta" if self.has_waitlist else self.ctx.path_of(self.ctx.project.site.get("home", "player"), self.lang) + "#beta"
-        if self.role == "host" and not self.has_waitlist:
+        target = "#beta" if self.has_beta else self.ctx.path_of(self.ctx.project.site.get("home", "player"), self.lang) + "#beta"
+        if self.role == "host" and not self.has_beta:
             target = self.ctx.path_of(self.ctx.project.site.get("host_home", "host"), self.lang) + "#beta"
         cta = (
             f'<a class="lpill lpill-sm solid nav-cta" href="{esc(target)}">'
@@ -346,7 +376,7 @@ class PageRenderer:
         brand = str(self.ctx.project.brand["name"])
         # Client strings keep their own placeholders ({n}, {url}, {move_up}); only the brand is filled here.
         strings = {k[3:]: v.replace("{brand}", brand) for k, v in self.ctx.ui.get(self.lang, {}).items() if k.startswith("js_")}
-        data = json.dumps(strings, ensure_ascii=False).replace("</", "<\\/")
+        data = script_json(strings)
         return (
             f'<script type="application/json" id="wl-strings">{data}</script>\n'
             f'<script src="/assets/waitlist.js{self.ctx.asset_version}" defer></script>'
@@ -361,7 +391,7 @@ class PageRenderer:
         return method(section, index)
 
     def heading_id(self, section: dict[str, Any], index: int) -> str:
-        return f"h-{section.get('id') or index + 1}"
+        return esc(f"h-{section.get('id') or index + 1}")
 
     def s_hero(self, s: dict[str, Any], i: int) -> str:
         lines = "".join(f"<span>{self.md(line)}</span>" for line in s["lines"])
@@ -457,7 +487,7 @@ class PageRenderer:
                 self.videos.append(
                     jsonld.video(
                         plain(self.fill(s["h2"])),
-                        plain(self.fill(s.get("text", ""))),
+                        plain(self.fill(s.get("text", ""))) or self.description(self.indexable()),
                         self.ctx.base + "/" + clip,
                         self.ctx.base + "/" + poster,
                         str(record["recorded_at"]),
@@ -574,6 +604,7 @@ class PageRenderer:
 
     def s_close(self, s: dict[str, Any], i: int) -> str:
         hid = self.heading_id(s, i)
+        self.has_beta = True
         return (
             f'<section class="close" id="beta" aria-labelledby="{hid}">\n'
             f'  <div><h2 id="{hid}">{self.md(s["h2"])}</h2></div>\n'
@@ -591,7 +622,7 @@ class PageRenderer:
 
     def s_item_strip(self, s: dict[str, Any], i: int) -> str:
         assert self.item is not None
-        rows = [("status", self.status_label(), "ok" if self.item.live else "no")]
+        rows = [("status", self.status_label(), "ok" if self.item.offered else "no")]
         for fact in self.item.record.get("facts", []):
             rows.append((fact["label"], fact["value"], fact.get("tone", "")))
         dl = "".join(
@@ -601,8 +632,14 @@ class PageRenderer:
         )
         verdict_text = self.field(s.get("verdict", "")) or s.get("verdict_fallback", "")
         verdict = self.md(verdict_text) if verdict_text else ""
-        if not self.item.live and s.get("verdict_paused"):
-            verdict = self.md(s["verdict_paused"])
+        if not self.item.offered:
+            if self.item.status == "blocked" and self.item.record.get("reason"):
+                verdict = self.md(str(self.item.record["reason"]))
+            elif self.item.native and s.get("verdict_native"):
+                verdict = self.md(s["verdict_native"])
+            elif s.get("verdict_paused"):
+                verdict = self.md(s["verdict_paused"])
+        self.has_beta = True
         return (
             '<section class="g-strip" aria-labelledby="h1">\n'
             f'  <div><h1 id="h1">{self.md(s["h1"])}</h1><p class="verdict">{verdict}</p></div>\n'

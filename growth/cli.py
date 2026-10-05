@@ -63,9 +63,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     try:
         if args.command == "tick":
-            for line in tick(engine).lines():
+            report = tick(engine)
+            for line in report.lines():
                 print(line)
-            return 0
+            return 1 if report.failed else 0
         if args.command == "run":
             status = run_now(engine, args.scope, args.job)
             print(status)
@@ -73,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "build":
             project = engine.projects[args.project]
             for job in ("fetch-data", "build-site"):
-                matches = [j.id for j in project.jobs.values() if j.kind == job]
+                matches = [j.id for j in project.jobs.values() if j.kind == job and j.enabled]
                 for jid in matches:
                     status = run_now(engine, project.id, jid)
                     print(f"{jid}: {status}")
@@ -84,6 +85,9 @@ def main(argv: list[str] | None = None) -> int:
     except EngineBusy as exc:
         print(f"busy: {exc}", file=sys.stderr)
         return 0 if args.command == "tick" else 1
+    except KeyError as exc:
+        print(exc.args[0], file=sys.stderr)
+        return 1
     return 2
 
 

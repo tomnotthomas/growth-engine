@@ -31,7 +31,10 @@ makes stale-run recovery simple: a run still marked `running` when a tick takes 
 process that died, and becomes `interrupted`.
 
 Retries are per slot and only for idempotent jobs (`failed` or `interrupted`, up to `max_attempts`,
-while the slot is younger than `max_late`). A new job starts at its latest slot and never backfills.
+while the slot is younger than `max_late`). With `catchup = "all"` every such slot is retried, even
+after a later slot succeeded; otherwise only the latest. A job that finds no AI budget once it has
+started gives its claim back, so its slot stays due. A new job starts at its latest slot and never
+backfills.
 
 Outward actions go through **`JobContext.act(action, key, do)`**: the policy check, then a row in the
 `effects` table (`PRIMARY KEY (scope, key)`) reserved as `pending` before the action and marked `done`
@@ -102,7 +105,7 @@ row. `/api/waitlist/stats` (Bearer `STATS_TOKEN`) feeds the digest.
 
 ## The digest's goal tracker
 
-`goal.py` reads the stats. Confirmed sign-ups per day against a linear plan from `[goal] start` to
-`start + days`, what is needed per day from now on, a projection from the last 7 days, sign-ups by
-source, and the referral **k-factor**: for weekly cohorts at least two weeks old, the confirmed
-sign-ups the cohort's members invited, divided by the cohort's size.
+`goal.py` reads the stats. Confirmed sign-ups per day against a linear plan over the `days` days from
+`[goal] start` (the deadline is the last of them), what is needed per day from now on, a projection
+from the last 7 days (only the days since the start in the first week), sign-ups by source, and the referral **k-factor**: for weekly cohorts at least two weeks old, the confirmed
+sign-ups the cohort's members invited, divided by the cohort's size. Before the start the status says when the goal starts.

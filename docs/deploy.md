@@ -21,8 +21,9 @@ It builds the site, creates the D1 database on the first run (and records its id
    - `EMAIL_API_KEY`: the mail provider's API key (Brevo or Resend; the sender domain must be verified there),
    - `STATS_TOKEN`: a long random string; also put it in the engine's env file under the project's `stats_token_env`,
    - `HASH_SALT`: a long random string for hashing IPs in the rate limit.
-4. In the project: `[waitlist] email_from` with an address on the verified domain, and
-   `[goal] start` set to the launch date.
+4. In the project: `[waitlist] email_provider` set to `brevo` or `resend` (the default `log` only
+   prints mails, for local development, and the deploy command refuses it), `email_from` with an
+   address on the verified domain, and `[goal] start` set to the launch date.
 
 Until `EMAIL_API_KEY` exists, the Worker answers sign-ups with "opens soon" and stores nothing.
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -18,6 +19,16 @@ class HttpError(Exception):
     pass
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        return None
+
+
+def origin(url: str) -> str:
+    parts = urllib.parse.urlsplit(url)
+    return f"{parts.scheme}://{parts.hostname or ''}"
+
+
 def request(
     method: str,
     url: str,
@@ -27,6 +38,7 @@ def request(
     timeout: float = 30,
     retries: int = 0,
     backoff: float = 5,
+    follow_redirects: bool = True,
 ) -> tuple[int, bytes]:
     check_url(url)
     data = None
@@ -35,13 +47,17 @@ def request(
         data = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
         sent["Content-Type"] = "application/json; charset=utf-8"
     sent.update(headers or {})
+    opener = urllib.request.build_opener() if follow_redirects else urllib.request.build_opener(_NoRedirect)
     last: Exception | None = None
     for attempt in range(retries + 1):
         req = urllib.request.Request(url, data=data, method=method, headers=sent)
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with opener.open(req, timeout=timeout) as resp:
                 return resp.status, resp.read()
         except urllib.error.HTTPError as exc:
+            if 300 <= exc.code < 400 and not follow_redirects:
+                exc.close()
+                raise HttpError(f"{method} {origin(url)} answered {exc.code} (redirects are not followed)") from None
             if exc.code < 500 and exc.code != 429:
                 return exc.code, exc.read()
             last = exc
@@ -49,14 +65,14 @@ def request(
             last = exc
         if attempt < retries:
             time.sleep(backoff * (attempt + 1))
-    raise HttpError(f"{method} {url} failed: {last}")
+    raise HttpError(f"{method} {origin(url)} failed: {last}")
 
 
 def get_json(url: str, **kwargs: Any) -> Any:
     status, raw = request("GET", url, **kwargs)
     if status != 200:
-        raise HttpError(f"GET {url} answered {status}")
+        raise HttpError(f"GET {origin(url)} answered {status}")
     try:
         return json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise HttpError(f"GET {url} did not return JSON: {exc}") from None
+        raise HttpError(f"GET {origin(url)} did not return JSON: {exc}") from None

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..util import read_toml
+from .html import safe_href
 
 if TYPE_CHECKING:
     from ..config import Project
@@ -37,6 +38,8 @@ SECTION_FIELDS: dict[str, tuple[str, ...]] = {
 CTAS = {"waitlist", "host-waitlist", "none"}
 PLACEHOLDER = re.compile(r"\{([a-z_][a-z0-9_.]*)\}")
 SITE_KEYS = {"brand", "app_url", "year", "move_up", "checked"}
+SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+LINK_FORMS = ("page:", "item:", "app:", "legal:")
 
 
 @dataclass
@@ -148,7 +151,7 @@ def validate_site(project: "Project") -> list[str]:
             allowed = SITE_KEYS | (collection_keys.get(page.collection, set()) if page.kind == "item" else set())
             for text in _strings(spec):
                 for name in PLACEHOLDER.findall(text):
-                    if name.split(".")[0] not in allowed:
+                    if name not in allowed:
                         errors.append(f"{lloc}: unknown placeholder {{{name}}}")
                 if brand and len(brand) >= 3 and re.search(rf"\b{re.escape(brand)}\b", text):
                     errors.append(f"{lloc}: write {{brand}} instead of {brand!r} so a rename is one config change")
@@ -160,6 +163,8 @@ def validate_site(project: "Project") -> list[str]:
                     errors.append(f"{lloc}: link to unknown page {href}")
                 if href.startswith("item:") and href[5:].partition("/")[0] not in project.collections:
                     errors.append(f"{lloc}: link to unknown collection {href}")
+                if not href.startswith(LINK_FORMS) and not safe_href(href):
+                    errors.append(f"{lloc}: link {href} must start with /, #, https:, mailto:, page:, item:, app: or legal:")
             for i, section in enumerate(spec.sections):
                 errors.extend(_check_section(section, f"{lloc} section {i + 1}", project, pages))
 
@@ -223,6 +228,8 @@ def _check_data(project: "Project", where: str) -> list[str]:
         for item in items:
             if not item.get("slug") or not item.get("name"):
                 errors.append(f"{where}/{conf.get('curated')}: every item needs slug and name")
+            elif not SLUG.match(str(item["slug"])):
+                errors.append(f"{where}/{conf.get('curated')}: slug {item['slug']!r} must be lower-case letters and digits joined by single dashes")
             if item.get("slug") in slugs:
                 errors.append(f"{where}/{conf.get('curated')}: duplicate slug {item.get('slug')}")
             slugs.add(item.get("slug"))
@@ -234,13 +241,12 @@ def _check_data(project: "Project", where: str) -> list[str]:
 
 
 def _item_keys(project: "Project", cid: str) -> set[str]:
+    """Placeholders an item page can fill: the computed ones, plus fields every item that may get a page has."""
     conf = project.collections.get(cid, {})
-    keys = {"name", "slug", "short", "checked", "status_label", "note", "item"}
     path = project.root / str(conf.get("curated", ""))
-    if path.is_file():
-        for item in read_toml(path).get("item", []):
-            keys.update(item.keys())
-    return keys
+    items = [i for i in read_toml(path).get("item", []) if i.get("page") is not False] if path.is_file() else []
+    shared = set.intersection(*(set(i) for i in items)) if items else set()
+    return {"name", "slug", "short", "status_label"} | shared
 
 
 def _strings(spec: PageLang) -> list[str]:

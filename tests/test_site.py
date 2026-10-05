@@ -7,9 +7,12 @@ import json
 import re
 from datetime import timedelta
 
+from growth.config import ConfigError
 from growth.policy import PolicyViolation
 from growth.runner import run_now
+from growth.site import jsonld
 from growth.site.build import BuildError, build_site
+from growth.site.html import inline
 
 from .helpers import NOW, HomeTestCase
 
@@ -29,9 +32,11 @@ class SiteTestCase(HomeTestCase):
     def page(self, path: str) -> str:
         return (self.public / path.strip("/") / "index.html").read_text(encoding="utf-8")
 
+    def jsonld_nodes(self, html: str) -> dict[str, dict]:
+        return {node["@type"]: node for node in json.loads(LD.search(html).group(1))["@graph"]}
+
     def jsonld_types(self, html: str) -> set[str]:
-        data = json.loads(LD.search(html).group(1))
-        return {node["@type"] for node in data["@graph"]}
+        return set(self.jsonld_nodes(html))
 
     def make_public(self) -> None:
         self.edit("projects/example/project.toml", "domain_decided = false", "domain_decided = true")
@@ -80,6 +85,7 @@ class Pages(SiteTestCase):
         self.assertIn("noindex", self.page("/plugins/glasshouse-reverb/"))
 
     def test_hreflang_and_canonical(self) -> None:
+        self.make_public()
         self.build()
         html = self.page("/")
         self.assertIn('<link rel="canonical" href="https://kiln.example/">', html)
@@ -129,6 +135,85 @@ class Pages(SiteTestCase):
         self.build(now=NOW + timedelta(hours=7))
         html = self.page("/plugins/tapeworm-delay/")
         self.assertIn("Not offered right now", html)
+
+    def test_status_change_to_blocked_or_native_keeps_the_url(self) -> None:
+        self.build()
+        self.edit("projects/example/data/plugins.toml", 'name = "Tapeworm Delay"\nstatus = "playable"', 'name = "Tapeworm Delay"\nstatus = "blocked"\nreason = "Its licence check now fails on a server."')
+        self.build(now=NOW + timedelta(hours=7))
+        html = self.page("/plugins/tapeworm-delay/")
+        self.assertIn("Its licence check now fails on a server.", html)
+        self.assertIn("Not offered right now", html)
+        self.edit("projects/example/data/plugins.toml", 'status = "blocked"\nreason = "Its licence check now fails on a server."\nnative_version = "none"', 'status = "playable"\nnative_version = "vendor"')
+        self.edit("projects/example/pages/plugin.toml", 'cta = "waitlist"', 'cta = "waitlist"\nverdict_native = "{name} now ships for the Mac."')
+        self.build(now=NOW + timedelta(hours=14))
+        html = self.page("/plugins/tapeworm-delay/")
+        self.assertIn("Tapeworm Delay now ships for the Mac.", html)
+        self.assertIn("Not offered right now", html)
+
+    def test_item_pages_carry_hreflang_for_their_indexable_versions(self) -> None:
+        self.append(
+            "projects/example/pages/plugin.toml",
+            '[langs.de]\npath = "/de/plugins/{slug}/"\ntitle = "{name} online | {brand}"\ndescription = "{name} im Browser mit {brand}."\n\n'
+            '[[langs.de.sections]]\ntype = "item-strip"\nh1 = "{name} **online**"\n',
+        )
+        self.make_public()
+        self.build()
+        html = self.page("/plugins/tapeworm-delay/")
+        self.assertIn('<link rel="alternate" hreflang="de" href="https://kiln.example/de/plugins/tapeworm-delay/">', html)
+        self.assertIn('<link rel="alternate" hreflang="x-default" href="https://kiln.example/plugins/tapeworm-delay/">', html)
+        self.assertIn('<a href="/de/plugins/tapeworm-delay/" hreflang="de"', html)  # language switcher
+        sitemap = (self.public / "sitemap.xml").read_text()
+        self.assertIn('hreflang="x-default" href="https://kiln.example/plugins/tapeworm-delay/"', sitemap)
+        self.assertIn('hreflang="de" href="https://kiln.example/de/plugins/tapeworm-delay/"', sitemap)
+        glass = self.page("/plugins/glasshouse-reverb/")  # noindex: no hreflang cluster
+        self.assertNotIn('rel="alternate" hreflang', glass)
+        self.assertIn('<a href="/de/plugins/glasshouse-reverb/" hreflang="de"', glass)
+
+    def test_lastmod_moves_only_when_the_content_changes(self) -> None:
+        self.make_public()
+        self.build()
+        later = self.build(now=NOW + timedelta(days=1))  # a new fetch moves the "checked" date only
+        self.assertEqual(later.changed, [])
+        path = "/plugins/tapeworm-delay/"
+        self.assertEqual(self.jsonld_nodes(self.page(path))["Article"]["dateModified"], "2026-10-05")
+        self.edit("projects/example/data/plugins.toml", "only ships for Windows.", "only ships for Windows 10 and 11.")
+        changed = self.build(now=NOW + timedelta(days=2))
+        self.assertEqual(changed.changed, [path])
+        self.assertEqual(self.jsonld_nodes(self.page(path))["Article"]["dateModified"], "2026-10-07")
+        sitemap = (self.public / "sitemap.xml").read_text()
+        self.assertIn(f"<loc>https://kiln.example{path}</loc>\n    <lastmod>2026-10-07</lastmod>", sitemap)
+        self.assertIn("<loc>https://kiln.example/</loc>\n    <lastmod>2026-10-05</lastmod>", sitemap)
+
+    def test_indexnow_key_file_is_published(self) -> None:
+        self.make_public()
+        self.append("projects/example/project.toml", '[channels.indexnow]\nenabled = true\n\n[jobs.ping]\nkind = "indexnow"\nschedule = "daily 05:00"\nkey = "abcdefgh12"\n')
+        self.build()
+        self.assertEqual((self.public / "abcdefgh12.txt").read_text(), "abcdefgh12")
+
+    def test_nav_links_to_the_beta_anchor_only_where_it_exists(self) -> None:
+        result = self.build()
+        for page in result.pages:
+            html = self.page(page.path)
+            if 'nav-cta" href="#beta"' in html:
+                self.assertIn('id="beta"', html, page.path)
+        self.assertIn('nav-cta" href="/#beta"', self.page("/waitlist/"))
+
+    def test_breadcrumbs_keep_absolute_links_and_videos_have_a_description(self) -> None:
+        self.edit("projects/example/pages/plugin.toml", '{ text = "{brand}", href = "page:landing" }', '{ text = "{brand}", href = "app:" }')
+        self.edit("projects/example/pages/plugin.toml", 'text = "A real recording."\n', "")
+        (self.project_dir / "media" / "video").mkdir()
+        (self.project_dir / "media" / "video" / "tapeworm.mp4").write_bytes(b"clip")
+        (self.project_dir / "media" / "img" / "tapeworm.svg").write_text("<svg/>")
+        self.append(
+            "projects/example/media.toml",
+            '[[media]]\npath = "video/tapeworm.mp4"\nsource = "own-recording"\n\n[[media]]\npath = "img/tapeworm.svg"\nsource = "own-recording"\n',
+        )
+        self.edit("projects/example/data/measurements.toml", 'measured_at = "2026-10-01"', 'measured_at = "2026-10-01"\nclip = "video/tapeworm.mp4"\nposter = "img/tapeworm.svg"\nrecorded_at = "2026-10-01"')
+        self.build()
+        nodes = self.jsonld_nodes(self.page("/plugins/tapeworm-delay/"))
+        trail = [x.get("item") for x in nodes["BreadcrumbList"]["itemListElement"]]
+        self.assertEqual(trail, ["https://app.kiln.example/", "https://kiln.example/plugins/", None])
+        self.assertEqual(nodes["VideoObject"]["description"], "Run Tapeworm Delay in your browser with Kiln.")
 
     def test_waitlist_forms_and_worker_bundle(self) -> None:
         self.build()
@@ -193,3 +278,38 @@ class Guards(SiteTestCase):
             for ref in re.findall(r'(?:src|href)="(https?://[^"]+)"', html):
                 self.assertFalse(ref.endswith((".js", ".css", ".woff2", ".png", ".jpg")), f"{file}: {ref}")
 
+
+    def test_curated_values_are_shown_as_text_not_markup(self) -> None:
+        self.edit("projects/example/data/plugins.toml", 'name = "Tapeworm Delay"', 'name = "Tapeworm [x](https://evil.example) <i>Delay</i>"')
+        self.build()
+        html = self.page("/plugins/tapeworm-delay/")
+        self.assertNotIn('href="https://evil.example"', html)
+        self.assertNotIn("<i>", html)
+        self.assertIn("Tapeworm [x](https://evil.example) &lt;i&gt;Delay&lt;/i&gt; <b>online</b>", html)
+
+    def test_links_only_go_to_safe_targets(self) -> None:
+        with self.assertRaises(ValueError):
+            inline("[x](javascript:alert(1))")
+        self.assertEqual(inline("[x](https://a.example/)"), '<a href="https://a.example/">x</a>')
+        self.edit("projects/example/pages/landing.toml", "(page:plugins)", "(javascript:alert)")
+        with self.assertRaises(ConfigError) as caught:
+            self.engine()
+        self.assertIn("link javascript:alert must start with", str(caught.exception))
+
+    def test_script_data_cannot_open_markup(self) -> None:
+        text = jsonld.graph([jsonld.organization("A</script><b>&", "https://kiln.example/")])
+        for char in "<>&":
+            self.assertNotIn(char, text)
+        self.assertEqual(json.loads(text)["@graph"][0]["name"], "A</script><b>&")
+
+    def test_a_slug_that_leaves_the_site_folder_is_refused(self) -> None:
+        self.edit("projects/example/data/plugins.toml", 'slug = "glasshouse-reverb"', 'slug = "../../../escape"')
+        with self.assertRaises(ConfigError) as caught:
+            self.engine()
+        self.assertIn("slug '../../../escape' must be", str(caught.exception))
+
+    def test_a_placeholder_some_items_lack_is_refused(self) -> None:
+        self.edit("projects/example/pages/plugin.toml", 'description = "Run {name}', 'description = "{verdict} Run {name}')
+        with self.assertRaises(ConfigError) as caught:
+            self.engine()
+        self.assertIn("unknown placeholder {verdict}", str(caught.exception))

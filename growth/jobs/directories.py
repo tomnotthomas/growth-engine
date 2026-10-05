@@ -5,7 +5,8 @@
   for the best-scoring entries without a draft; text with numbers the fact sheet lacks is refused.
 - submit (daily, no AI, never before launch day): submit only to sites the project verified for
   automatic submission (an API or a plain form whose terms allow it, no captcha, no account). Every
-  other drafted entry is marked skipped, and the digest reports it.
+  other website entry is marked skipped with the reason, and the digest reports it. Skipped entries
+  are checked again on every run, so a site verified later is submitted then.
 """
 
 from __future__ import annotations
@@ -16,8 +17,18 @@ from typing import Any
 from urllib.parse import urlencode
 
 from .. import net
-from ..directories import DEFAULT_SOURCE, Entry, launch_reached, load_catalogue, merge, parse_list, ranked, save_catalogue
-from ..policy import Action
+from ..directories import (
+    DEFAULT_SOURCE,
+    Entry,
+    entry_id,
+    launch_reached,
+    load_catalogue,
+    merge,
+    parse_list,
+    ranked,
+    save_catalogue,
+)
+from ..policy import Action, PolicyViolation, hostname, on_host
 from ..util import read_toml
 from .digest import invented_numbers
 
@@ -61,7 +72,7 @@ def sync(ctx: Any) -> str:
 def draft(ctx: Any) -> str:
     conf = _conf(ctx)
     entries = load_catalogue(ctx.state_dir)
-    todo = [e for e in ranked(entries) if e.status == "new" and e.section == "websites" and e.score > 0]
+    todo = [e for e in ranked(entries) if e.status in {"new", "skipped"} and not e.listing and e.section == "websites" and e.score > 0]
     todo = todo[: int(conf.get("draft_batch", 25))]
     if not todo:
         return "no directory needs a draft"
@@ -91,31 +102,66 @@ def submit(ctx: Any) -> str:
     today = ctx.now.astimezone(ctx.project.tz).date()
     if not launch_reached(launch, today):
         return f"waiting for launch day ({launch or 'not set'}); nothing submitted"
-    verified = {s["id"]: s for s in read_toml(ctx.project.root / conf["submit"]).get("site", [])} if conf.get("submit") else {}
+    sites = read_toml(ctx.project.root / conf["submit"]).get("site", []) if conf.get("submit") else []
+    verified = {entry_id("https://" + str(s.get("id", ""))): s for s in sites}
     entries = load_catalogue(ctx.state_dir)
-    sent = skipped = 0
-    for entry in ranked(entries):
-        if entry.status != "drafted":
-            continue
-        site = verified.get(entry.id)
-        if site is None:
-            entry.status = "skipped"
-            entry.note = "no API or plain form verified for automatic submission; needs a person"
-            skipped += 1
-            continue
-        action = Action(
-            channel="directory-submit",
-            kind="submit",
-            url=site["endpoint"],
-            target=entry.id,
-            meta={k: site.get(k) for k in ("terms_url", "terms_checked", "captcha", "account", "method")},
-        )
-        state = ctx.act(action, f"directory:{entry.id}", lambda s=site, e=entry: _post(ctx, s, e), retry_failed=False)
-        entry.status = "submitted" if state in {"done", "already"} else "failed"
+    counts = {"submitted": 0, "failed": 0, "skipped": 0}
+    try:
+        for entry in ranked(entries):
+            if entry.section == "websites" and entry.status in {"new", "drafted", "skipped"}:
+                counts[_submit_one(ctx, entry, verified.get(entry.id))] += 1
+    finally:
+        save_catalogue(ctx.state_dir, entries, str(conf.get("source", DEFAULT_SOURCE)), ctx.now.date().isoformat())
+    return f"submitted {counts['submitted']}, failed {counts['failed']}, skipped {counts['skipped']} (need a person)"
+
+
+def _submit_one(ctx: Any, entry: Entry, site: dict[str, Any] | None) -> str:
+    if not entry.listing:
+        refused = entry.note.startswith("draft refused")
+        return _mark(entry, "skipped", entry.note if refused else "no listing drafted (score too low or not reached yet); needs a person")
+    if site is None:
+        return _mark(entry, "skipped", "no API or plain form verified for automatic submission; needs a person")
+    problem = _site_problem(site, entry)
+    if problem:
+        return _mark(entry, "skipped", f"verified-submit entry unusable: {problem}")
+    action = Action(
+        channel="directory-submit",
+        kind="submit",
+        url=site["endpoint"],
+        target=entry.id,
+        meta={k: site.get(k) for k in ("terms_allow_automation", "terms_url", "terms_checked", "captcha", "account", "method")},
+    )
+    try:
+        state = ctx.act(action, f"directory:{entry.id}", lambda: _post(ctx, site, entry), retry_failed=False)
+    except PolicyViolation as exc:
+        return _mark(entry, "skipped", f"refused: {exc}")
+    except Exception as exc:
+        return _mark(entry, "failed", f"submission failed: {exc}")
+    if state in {"done", "already"}:
         entry.submitted_at = ctx.now.date().isoformat()
-        sent += state == "done"
-    save_catalogue(ctx.state_dir, entries, str(conf.get("source", DEFAULT_SOURCE)), ctx.now.date().isoformat())
-    return f"submitted {sent}, skipped {skipped} (need a person)"
+        return _mark(entry, "submitted", "")
+    if state == "unknown":
+        return _mark(entry, "skipped", "an earlier attempt never reported back; check the site by hand")
+    return _mark(entry, "failed", "an earlier attempt failed; not repeated")
+
+
+def _mark(entry: Entry, status: str, note: str) -> str:
+    entry.status, entry.note = status, note
+    return status
+
+
+def _site_problem(site: dict[str, Any], entry: Entry) -> str:
+    endpoint = str(site.get("endpoint", ""))
+    home = entry.id.split("/")[0]
+    if site.get("method") not in {"api", "form"}:
+        return f"method must be 'api' or 'form', not {site.get('method')!r}"
+    if not endpoint.startswith("https://"):
+        return "endpoint must be https"
+    if not on_host(hostname(endpoint), {home}):
+        return f"endpoint is not on {home}"
+    if not isinstance(site.get("fields"), dict) or not site["fields"]:
+        return "fields missing"
+    return ""
 
 
 def _post(ctx: Any, site: dict[str, Any], entry: Entry) -> str:
@@ -127,14 +173,19 @@ def _post(ctx: Any, site: dict[str, Any], entry: Entry) -> str:
         "description": entry.listing.get("description", ""),
     }
     fields = {k: re.sub(r"\{(\w+)\}", lambda m: str(values.get(m.group(1), m.group(0))), str(v)) for k, v in site["fields"].items()}
-    if site.get("method") == "api":
-        status, _ = net.request("POST", site["endpoint"], body=fields, timeout=30)
+    if site["method"] == "api":
+        status, _ = net.request("POST", site["endpoint"], body=fields, timeout=30, follow_redirects=False)
     else:
         body = urlencode(fields).encode("utf-8")
         status, _ = net.request(
-            "POST", site["endpoint"], body=body, headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=30
+            "POST",
+            site["endpoint"],
+            body=body,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+            follow_redirects=False,
         )
-    if status >= 400:
+    if not 200 <= status < 300:
         raise net.HttpError(f"{entry.id} answered {status}")
     return f"HTTP {status}"
 

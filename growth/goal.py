@@ -3,9 +3,11 @@
 Input is the waitlist Worker's /api/waitlist/stats answer. Definitions:
 
 - confirmed sign-ups count on the day they confirmed (double opt-in), not when they typed the address;
-- the plan line is linear from the start date to the deadline;
-- needed per day = what is left of the target divided by the days left;
-- projection = confirmed so far + the last 7 days' average per day x the days left;
+- the goal counts `days` days from the start date; the deadline is the last of them;
+- the plan line is linear over those days;
+- needed per day = what is left of the target divided by the goal days left (all of them before the start);
+- the average per day uses the last 7 days, or only the days since the start in the first week;
+- projection = confirmed so far + that average x the days left;
 - k-factor of a weekly cohort = confirmed sign-ups the cohort's members invited / cohort size. The
   headline k uses cohorts that are at least a week old, so their invites had time to arrive.
 """
@@ -33,31 +35,41 @@ def goal_report(stats: dict[str, Any] | None, goal: dict[str, Any], today: date)
     report["confirmed_total"] = total
     report["pending_total"] = int(stats.get("totals", {}).get("pending", 0))
 
+    start_text = str(goal.get("start", "") or "")
+    start = date.fromisoformat(start_text) if start_text else None
     last7 = [today - timedelta(days=i) for i in range(1, 8)]
     week = sum(per_day.get(d.isoformat(), 0) for d in last7)
+    pace_days = [d for d in last7 if start is None or d >= start] or last7
+    pace = sum(per_day.get(d.isoformat(), 0) for d in pace_days) / len(pace_days)
     report["last_7_days"] = week
-    report["avg_per_day_7"] = round(week / 7, 1)
+    report["avg_per_day_7"] = round(pace, 1)
     referred_week = sum(referred_per_day.get(d.isoformat(), 0) for d in last7)
     report["referral_share_7"] = round(referred_week / week, 3) if week else 0.0
 
-    start_text = str(goal.get("start", "") or "")
-    if not start_text or not days_total:
+    if start is None or not days_total:
         report["status"] = "goal clock not started: set [goal] start to the launch date"
+    elif today < start:
+        report.update(
+            start=start.isoformat(),
+            deadline=(start + timedelta(days=days_total - 1)).isoformat(),
+            days_left=days_total,
+            needed_per_day=round((target - total) / days_total, 1),
+            status=f"starts on {start.isoformat()}",
+        )
     else:
-        start = date.fromisoformat(start_text)
-        deadline = start + timedelta(days=days_total)
-        elapsed = max(0, min(days_total, (today - start).days))
-        left = max(0, (deadline - today).days)
+        end = start + timedelta(days=days_total)
+        elapsed = min(days_total, (today - start).days)
+        left = max(0, (end - today).days)
         plan = round(target * elapsed / days_total)
         report.update(
             start=start.isoformat(),
-            deadline=deadline.isoformat(),
+            deadline=(end - timedelta(days=1)).isoformat(),
             days_elapsed=elapsed,
             days_left=left,
             plan_to_date=plan,
             gap_to_plan=total - plan,
             needed_per_day=round((target - total) / left, 1) if left else None,
-            projection=round(total + week / 7 * left),
+            projection=round(total + pace * left),
         )
         report["on_track"] = report["projection"] >= target
         report["status"] = "on track" if report["on_track"] else "behind plan"
