@@ -94,7 +94,6 @@ export function makeHandler(config, deps = {}) {
     const ref = String(body.ref || "").toLowerCase();
     if (CODE.test(ref)) referrer = await env.DB.prepare("SELECT id FROM signups WHERE code = ? AND confirmed_at IS NOT NULL").bind(ref).first();
     const source = referrer ? "referral" : classify(String(body.src || ""), String(body.from || ""));
-    const anon = ANON.test(String(body.anon || "")) ? String(body.anon) : token().slice(0, 22);
     const country = countryOf(request);
     const t = token();
     const row = {
@@ -102,20 +101,19 @@ export function makeHandler(config, deps = {}) {
       role,
       lang,
       code: await freeCode(env),
-      anon,
       source,
     };
     const inserted = await env.DB.prepare(
-      "INSERT INTO signups (email, role, lang, code, confirm_hash, referred_by, source, page, anon, country, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(email) DO NOTHING",
+      "INSERT INTO signups (email, role, lang, code, confirm_hash, referred_by, source, page, country, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(email) DO NOTHING",
     )
-      .bind(email, role, lang, row.code, await hash(t), referrer ? referrer.id : null, source, String(body.page || "").slice(0, 60), anon, country, stamp)
+      .bind(email, role, lang, row.code, await hash(t), referrer ? referrer.id : null, source, String(body.page || "").slice(0, 60), country, stamp)
       .run();
     // The same address sent twice at once: the other request saved it and mails it; this one answers the same.
     if (!inserted.meta.changes) return reply(wantsJson, 202, { ok: true }, statusUrl({ sent: 1 }, lang, "", role));
     const saved = await env.DB.prepare("SELECT * FROM signups WHERE email = ?").bind(email).first();
     await mail(env, saved, "confirm", { confirm_url: confirmUrl(t, lang) });
     await mailed(env, saved);
-    later(relay(env, [event("waitlist_signup", anon, { role, lang, channel: source, page: saved.page, referred: Boolean(referrer), ...utm(body) }, request)]));
+    later(relay(env, [event("waitlist_signup", token(), { role, lang, channel: source, page: saved.page, referred: Boolean(referrer), ...utm(body) }, request)]));
     return reply(wantsJson, 202, { ok: true }, statusUrl({ sent: 1 }, lang, "", role));
   }
 
@@ -140,10 +138,10 @@ export function makeHandler(config, deps = {}) {
       .bind(stamp, await hash(s), row.id)
       .run();
     if (!done.meta.changes) return reply(wantsJson, 200, { ok: true, already: true }, statusUrl({ e: "already" }, row.lang, "", row.role));
-    const events = [event("waitlist_confirmed", row.anon, { role: row.role, lang: row.lang, channel: row.source, referred: Boolean(row.referred_by) }, request)];
+    const events = [event("waitlist_confirmed", token(), { role: row.role, lang: row.lang, channel: row.source, referred: Boolean(row.referred_by) }, request)];
     if (row.referred_by) {
       await creditReferrer(env, row.referred_by);
-      events.push(event("referral_joined", row.anon, { role: row.role, lang: row.lang, channel: "referral" }, request));
+      events.push(event("referral_joined", token(), { role: row.role, lang: row.lang, channel: "referral" }, request));
     }
     const position = await positionOf(env, row.id, row.role);
     await mail(env, row, "welcome", {

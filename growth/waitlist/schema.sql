@@ -1,5 +1,6 @@
 -- Waitlist with double opt-in and referrals (Cloudflare D1, SQLite dialect).
 -- Only hashes of the private tokens are stored; the tokens themselves exist only in the emails.
+-- No analytics id is stored, so no row can be joined to a visitor's analytics events.
 
 CREATE TABLE IF NOT EXISTS signups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -14,7 +15,6 @@ CREATE TABLE IF NOT EXISTS signups (
   source TEXT NOT NULL,
   page TEXT NOT NULL DEFAULT '',
   country TEXT NOT NULL DEFAULT '',          -- two letters from Cloudflare's geolocation, for the in-zone goal
-  anon TEXT NOT NULL DEFAULT '',             -- random analytics id from the sign-up page, never linked to the email
   created_at TEXT NOT NULL,
   mail_sent_at TEXT,
   mail_day TEXT,

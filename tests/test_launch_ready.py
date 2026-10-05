@@ -126,3 +126,32 @@ class StatsSource(HomeTestCase):
         with mock.patch.object(analytics, "waitlist_stats", return_value=(ledger, "")):
             stats, _ = analytics.signup_stats(project)  # no PostHog key in the environment
         self.assertEqual(stats["source_of_numbers"], "waitlist ledger")
+
+    def test_posthog_query_is_scoped_to_the_site(self) -> None:
+        project = self.engine().projects["example"]
+        project.analytics = {"provider": "posthog", "host": "https://eu.posthog.example", "project_id": "1", "api_key_env": "PH_KEY"}
+        sent = []
+
+        def answer(method, url, body=None, headers=None, timeout=None):
+            sent.append(body["query"]["query"])
+            return 200, b'{"results": []}'
+
+        with mock.patch.dict(os.environ, {"PH_KEY": "phx_test"}), mock.patch.object(analytics.net, "request", side_effect=answer):
+            stats, why = analytics.posthog_signup_stats(project)
+        self.assertEqual(why, "")
+        self.assertEqual(stats["totals"]["confirmed"], 0)
+        self.assertIn("properties.site = 'example'", sent[0])
+        self.assertIn(f"LIMIT {analytics.SIGNUP_ROWS}", sent[0])
+
+    def test_posthog_rows_at_the_limit_fall_back_to_the_ledger(self) -> None:
+        project = self.engine().projects["example"]
+        project.analytics = {"provider": "posthog", "host": "https://eu.posthog.example", "project_id": "1", "api_key_env": "PH_KEY"}
+        rows = [["2026-10-04", "player", "DE", "search", 1, 0]] * analytics.SIGNUP_ROWS
+        ledger = {"totals": {"confirmed": 7}, "days": [], "sources": [], "cohorts": []}
+        with mock.patch.dict(os.environ, {"PH_KEY": "phx_test"}), mock.patch.object(analytics, "_hogql", return_value=rows), mock.patch.object(
+            analytics, "waitlist_stats", return_value=(ledger, "")
+        ):
+            stats, why = analytics.signup_stats(project)
+        self.assertEqual(why, "")
+        self.assertEqual(stats["source_of_numbers"], "waitlist ledger")
+        self.assertEqual(stats["totals"]["confirmed"], 7)

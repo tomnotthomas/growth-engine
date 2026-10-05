@@ -349,7 +349,7 @@ test("the country is stored for the in-zone goal, and stats report it", async ()
 });
 
 test("analytics: only listed events and properties are relayed, with no IP, email or person profile", async () => {
-  const { call, relayed, signup, confirm, sent, tokenFrom } = setup();
+  const { call, relayed, signup, confirm, sent, tokenFrom, env } = setup();
   const anon = "a1b2c3d4-0000-4000-8000-000000000000";
   const res = await call("/api/e", {
     method: "POST",
@@ -378,7 +378,11 @@ test("analytics: only listed events and properties are relayed, with no IP, emai
   const names = relayed.map((e) => e.event);
   assert.deepEqual(names.slice(1), ["waitlist_signup", "waitlist_confirmed"]);
   assert.ok(relayed.every((e) => !JSON.stringify(e).includes("funnel@example.org")), "no email in any event");
-  assert.equal(relayed.at(-1).distinct_id, anon, "the funnel links by the page's random id only");
+  const server = relayed.slice(1);
+  assert.ok(server.every((e) => e.distinct_id !== anon), "server events are not sent under the page's id");
+  assert.notEqual(server[0].distinct_id, server[1].distinct_id, "every server event gets a fresh id");
+  assert.equal(server[0].properties.country, "AT");
+  assert.ok(!("anon" in row(env, "funnel@example.org")), "no analytics id is stored next to the email");
 });
 
 test("an expired confirm link and a bad request keep the language", async () => {

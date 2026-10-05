@@ -123,7 +123,6 @@
   document.querySelectorAll("form[data-waitlist]").forEach(function (form) {
     if (ref) form.elements.ref.value = ref;
     form.elements.src.value = (query.get("utm_source") || "").slice(0, 40);
-    if (form.elements.anon) form.elements.anon.value = anon;
     var from = document.createElement("input");
     from.type = "hidden";
     from.name = "from";

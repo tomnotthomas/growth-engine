@@ -13,6 +13,8 @@ from urllib.parse import urlparse
 
 from . import net
 
+SIGNUP_ROWS = 50000
+
 
 def traffic(project: Any) -> dict[str, Any]:
     """Pageviews of the generated site (events relayed by the Worker carry site = project id)."""
@@ -79,10 +81,12 @@ def posthog_signup_stats(project: Any) -> tuple[dict[str, Any] | None, str]:
             key,
             "SELECT toDate(timestamp) AS d, properties.role AS role, properties.country AS country, properties.channel AS channel, "
             "count() AS n, countIf(properties.referred = true) AS referred FROM events WHERE event = 'waitlist_confirmed' "
-            "GROUP BY d, role, country, channel ORDER BY d",
+            f"AND properties.site = '{_quote(project.id)}' GROUP BY d, role, country, channel ORDER BY d LIMIT {SIGNUP_ROWS}",
         )
     except Exception as exc:  # report, never guess
         return None, f"PostHog query failed: {exc}"
+    if len(rows) >= SIGNUP_ROWS:
+        return None, f"PostHog returned {len(rows)} rows, the limit, so the numbers may be cut"
     days: dict[tuple[str, str, str], dict[str, Any]] = {}
     sources: dict[tuple[str, str, str], int] = {}
     for d, role, country, channel, n, referred in rows:

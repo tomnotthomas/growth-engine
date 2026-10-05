@@ -797,7 +797,7 @@ class PageRenderer:
         return (
             f'<form class="wl" data-waitlist action="/api/waitlist" method="post" novalidate>\n'
             f'  <input type="hidden" name="role" value="{role}"><input type="hidden" name="lang" value="{esc(self.lang)}">'
-            '<input type="hidden" name="ref" value=""><input type="hidden" name="src" value=""><input type="hidden" name="anon" value="">'
+            '<input type="hidden" name="ref" value=""><input type="hidden" name="src" value="">'
             f'<input type="hidden" name="page" value="{esc(self.page.id)}">\n'
             '  <p class="hp" aria-hidden="true"><label>Website <input name="website" tabindex="-1" autocomplete="off"></label></p>\n'
             f'  <p class="wl-ref" data-ref-note hidden>{esc(self.fill(t("ref_note_" + role)))}</p>\n'
