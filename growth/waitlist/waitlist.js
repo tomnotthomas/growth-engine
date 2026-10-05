@@ -113,7 +113,7 @@ export function makeHandler(config, deps = {}) {
     const saved = await env.DB.prepare("SELECT * FROM signups WHERE email = ?").bind(email).first();
     await mail(env, saved, "confirm", { confirm_url: confirmUrl(t, lang) });
     await mailed(env, saved);
-    later(relay(env, [event("waitlist_signup", token(), { role, lang, channel: source, page: saved.page, referred: Boolean(referrer), ...utm(body) }, request)]));
+    later(relay(env, [event("waitlist_signup", token(), { role, lang, channel: source, page: saved.page, referred: Boolean(referrer), ...utm(body) }, country)]));
     return reply(wantsJson, 202, { ok: true }, statusUrl({ sent: 1 }, lang, "", role));
   }
 
@@ -138,10 +138,10 @@ export function makeHandler(config, deps = {}) {
       .bind(stamp, await hash(s), row.id)
       .run();
     if (!done.meta.changes) return reply(wantsJson, 200, { ok: true, already: true }, statusUrl({ e: "already" }, row.lang, "", row.role));
-    const events = [event("waitlist_confirmed", token(), { role: row.role, lang: row.lang, channel: row.source, referred: Boolean(row.referred_by) }, request)];
+    const events = [event("waitlist_confirmed", token(), { role: row.role, lang: row.lang, channel: row.source, referred: Boolean(row.referred_by) }, row.country)];
     if (row.referred_by) {
       await creditReferrer(env, row.referred_by);
-      events.push(event("referral_joined", token(), { role: row.role, lang: row.lang, channel: "referral" }, request));
+      events.push(event("referral_joined", token(), { role: row.role, lang: row.lang, channel: "referral" }, row.country));
     }
     const position = await positionOf(env, row.id, row.role);
     await mail(env, row, "welcome", {
@@ -298,7 +298,7 @@ export function makeHandler(config, deps = {}) {
       for (const [key, value] of Object.entries(item.props || {})) {
         if (CLIENT_PROPS.has(key) && ["string", "number", "boolean"].includes(typeof value)) props[key] = typeof value === "string" ? value.slice(0, 120) : value;
       }
-      events.push(event(item.event, anon, props, request));
+      events.push(event(item.event, anon, props, countryOf(request)));
     }
     if (events.length) later(relay(env, events));
     return new Response(null, { status: 204 });
@@ -426,13 +426,12 @@ function countryOf(request) {
 }
 
 /** One analytics event: no personal data, no IP, no person profile; country from Cloudflare only. */
-function event(name, anon, props, request) {
-  const country = countryOf(request) || undefined;
+function event(name, anon, props, country) {
   const clean = Object.fromEntries(Object.entries(props).filter(([, v]) => v !== undefined && v !== ""));
   return {
     event: name,
     distinct_id: anon || "anonymous",
-    properties: { ...clean, country, site: SITE.id, $process_person_profile: false, $geoip_disable: true, $ip: null },
+    properties: { ...clean, country: country || undefined, site: SITE.id, $process_person_profile: false, $geoip_disable: true, $ip: null },
   };
 }
 

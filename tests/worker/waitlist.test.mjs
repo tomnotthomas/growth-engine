@@ -385,6 +385,14 @@ test("analytics: only listed events and properties are relayed, with no IP, emai
   assert.ok(!("anon" in row(env, "funnel@example.org")), "no analytics id is stored next to the email");
 });
 
+test("server events about a sign-up carry the sign-up country, not the confirm click's", async () => {
+  const { call, relayed, signup, sent, tokenFrom } = setup();
+  await signup({ email: "roam@example.org" }, {}, "DE");
+  await call("/api/waitlist/confirm", { method: "POST", body: new URLSearchParams({ t: tokenFrom(sent.at(-1), "t") }), country: "US" });
+  const confirmed = relayed.find((e) => e.event === "waitlist_confirmed");
+  assert.equal(confirmed.properties.country, "DE");
+});
+
 test("an expired confirm link and a bad request keep the language", async () => {
   const { call } = setup();
   const res = await call("/api/waitlist/confirm", { method: "POST", body: new URLSearchParams({ t: "x".repeat(32), lang: "de" }) });
