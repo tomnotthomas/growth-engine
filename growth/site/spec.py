@@ -130,6 +130,10 @@ def validate_site(project: "Project") -> list[str]:
         legal_keys |= {"hardware.floor", "hardware.models"}
     live = project.site.get("live_languages")
     if live is not None:
+        if not live:
+            errors.append(f"{where}: [site] live_languages is empty; leave it out to build every language")
+        elif project.default_language not in live:
+            errors.append(f"{where}: [site] live_languages must include the default language {project.default_language!r}")
         for lang in live:
             if lang not in project.languages:
                 errors.append(f"{where}: [site] live_languages lists {lang!r}, which is not in languages")

@@ -10,6 +10,7 @@ from datetime import date
 from unittest import mock
 
 from growth import analytics
+from growth.config import ConfigError
 from growth.goal import goal_report
 from growth.runner import run_now
 from growth.site.build import BuildError, build_site
@@ -56,6 +57,14 @@ class SiteBuild(HomeTestCase):
         self.assertNotIn('hreflang="de"', self.page("/"))
         worker = (self.public.parent / "worker" / "config.js").read_text()
         self.assertNotIn('"de"', worker.split('"languages"')[1].split("]")[0])
+
+    def test_live_languages_must_be_non_empty_and_include_the_default(self) -> None:
+        for live, why in (("[]", "is empty"), ('["de"]', "must include the default language 'en'")):
+            self.edit("projects/example/project.toml", 'out = "example"', f'out = "example"\nlive_languages = {live}')
+            with self.assertRaises(ConfigError) as caught:
+                self.engine()
+            self.assertIn(why, str(caught.exception))
+            self.edit("projects/example/project.toml", f'out = "example"\nlive_languages = {live}', 'out = "example"')
 
     def test_game_search_data_lists_running_blocked_and_native_items_with_links(self) -> None:
         self.build()
@@ -126,6 +135,18 @@ class StatsSource(HomeTestCase):
         with mock.patch.object(analytics, "waitlist_stats", return_value=(ledger, "")):
             stats, _ = analytics.signup_stats(project)  # no PostHog key in the environment
         self.assertEqual(stats["source_of_numbers"], "waitlist ledger")
+
+    def test_the_ledger_wins_when_posthog_counts_fewer_confirmations(self) -> None:
+        project = self.engine().projects["example"]
+        project.analytics = {"provider": "posthog", "host": "https://eu.posthog.example", "project_id": "1", "api_key_env": "PH_KEY"}
+        rows = [["2026-10-04", "player", "DE", "search", 2, 0]]
+        ledger = {"totals": {"confirmed": 5}, "days": [], "sources": [], "cohorts": []}
+        with mock.patch.dict(os.environ, {"PH_KEY": "phx_test"}), mock.patch.object(analytics, "_hogql", return_value=rows), mock.patch.object(
+            analytics, "waitlist_stats", return_value=(ledger, "")
+        ):
+            stats, _ = analytics.signup_stats(project)
+        self.assertEqual(stats["source_of_numbers"], "waitlist ledger")
+        self.assertEqual(stats["totals"]["confirmed"], 5)
 
     def test_posthog_query_is_scoped_to_the_site(self) -> None:
         project = self.engine().projects["example"]

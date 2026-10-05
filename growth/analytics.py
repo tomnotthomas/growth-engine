@@ -105,9 +105,17 @@ def posthog_signup_stats(project: Any) -> tuple[dict[str, Any] | None, str]:
 
 
 def signup_stats(project: Any) -> tuple[dict[str, Any] | None, str]:
-    """PostHog when a key exists (with referral cohorts from the Worker if it answers), else the Worker's ledger."""
+    """PostHog when a key exists (with referral cohorts from the Worker if it answers), else the Worker's ledger.
+
+    The ledger wins whenever PostHog counts fewer confirmations than it, since relayed events can be lost.
+    """
     worker, worker_why = waitlist_stats(project)
     posthog, posthog_why = posthog_signup_stats(project)
+    ledger_total = int(((worker or {}).get("totals") or {}).get("confirmed", 0) or 0)
+    if posthog is not None and posthog["totals"]["confirmed"] < ledger_total:
+        # PostHog missed confirmations (a lost relay, or analytics switched on later): the ledger is the truth.
+        posthog = None
+        posthog_why = "PostHog counts fewer confirmations than the waitlist ledger"
     if posthog is not None:
         posthog["cohorts"] = (worker or {}).get("cohorts", [])
         posthog["source_of_numbers"] = "PostHog"

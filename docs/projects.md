@@ -19,9 +19,9 @@ projects/<id>/
 
 | Table | Keys |
 |---|---|
-| top level | `id` (= folder name), `name`, `enabled`, `timezone`, `languages`, `default_language`, `live_languages` (the languages built and linked now; default all; the rest stay ready but switched off) |
+| top level | `id` (= folder name), `name`, `enabled`, `timezone`, `languages`, `default_language` |
 | `[brand]` | `name` (used for `{brand}` everywhere), `wordmark`, `app_url` |
-| `[site]` | `base_url` (https, no trailing slash), `domain_decided`, `indexable`, `legal_notice` and `privacy` (a page id or a path), `footer_links` (page ids listed in the footer), `home`, `host_home`, `pages`, `ui`, `keywords`, `measurements`, `media`, `media_dir`, `share_image` (one path, or one per language), `theme`, `theme_css`, `theme_dirs`, `preload_fonts`, `theme_color`, `forbid_chars`, `out`, `base_theme` |
+| `[site]` | `base_url` (https, no trailing slash), `domain_decided`, `indexable`, `live_languages` (the languages built and linked now; must include `default_language`; default all), `legal_notice` and `privacy` (a page id or a path), `footer_links` (page ids listed in the footer), `home`, `host_home`, `pages`, `ui`, `keywords`, `measurements`, `media`, `media_dir`, `share_image` (one path, or one per language), `theme`, `theme_css`, `theme_dirs`, `preload_fonts`, `theme_color`, `forbid_chars`, `out`, `base_theme` |
 | `[legal]` | operator details the legal pages use as `{legal.<key>}`, for example `name`, `street`, `postcode_city`, `country`, `email`. A project with a waitlist refuses to build while a key its legal pages use is empty. |
 | `[hardware_check]` | `floor` (per language), `models_prefix`, `models`, `not_yet`, `not_host`, `family`: fills `{hardware.floor}` and `{hardware.models}` and drives the `hardware-check` section, which reads the graphics card in the browser and sends nothing |
 | `[rules]` | `footage_publishers`: whose game footage own posts and pages may show (own recordings only) |
