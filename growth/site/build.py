@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from ..config import INDEXNOW_KEY
 from ..policy import PolicyViolation, check_media
 from ..util import parse_duration, parse_iso, read_json, read_toml, sha256, write_atomic, write_json
 from .data import LiveData, load_media, load_measurements, resolve_items
@@ -144,8 +145,10 @@ def build_site(project: Any, state_dir: Path, dist_root: Path, *, now: datetime)
         _check_references(public, media, project)
         _write_robots_and_sitemap(project, rendered, registry, public)
         for job in project.jobs.values():
-            if job.kind == "indexnow":
-                key = str(job.params["key"])
+            if job.kind == "indexnow" and job.enabled:
+                key = str(job.params.get("key", ""))
+                if not INDEXNOW_KEY.fullmatch(key):
+                    raise BuildError(f"jobs.{job.id}: key must be 8-128 letters, digits or dashes")
                 write_atomic(public / f"{key}.txt", key)
         _write_404(project, ui, public, ctx.asset_version)
         if project.raw.get("waitlist"):

@@ -190,6 +190,21 @@ class Pages(SiteTestCase):
         self.build()
         self.assertEqual((self.public / "abcdefgh12.txt").read_text(), "abcdefgh12")
 
+    def test_a_switched_off_indexnow_job_without_a_key_publishes_no_key_file(self) -> None:
+        self.append("projects/example/project.toml", '[channels.indexnow]\nenabled = true\n\n[jobs.ping]\nkind = "indexnow"\nschedule = "daily 05:00"\nenabled = false\nkey = ""\n')
+        self.build()
+        self.assertEqual(sorted(p.name for p in self.public.glob("*.txt")), ["robots.txt"])
+
+    def test_a_bad_indexnow_key_never_leaves_public(self) -> None:
+        self.make_public()
+        self.append("projects/example/project.toml", '[channels.indexnow]\nenabled = true\n\n[jobs.ping]\nkind = "indexnow"\nschedule = "daily 05:00"\nkey = "abcdefgh12"\n')
+        engine = self.engine()
+        project = engine.projects["example"]
+        project.jobs["ping"].params["key"] = "../../escaped"
+        with self.assertRaises(BuildError):
+            build_site(project, engine.state_dir / "projects" / "example", engine.dist_dir, now=NOW)
+        self.assertFalse(any(engine.dist_dir.parent.rglob("escaped.txt")))
+
     def test_nav_links_to_the_beta_anchor_only_where_it_exists(self) -> None:
         result = self.build()
         for page in result.pages:

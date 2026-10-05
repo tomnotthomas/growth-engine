@@ -21,6 +21,7 @@ from .schedule import Schedule, parse_schedule
 from .util import parse_duration, read_toml
 
 ENGINE_SCOPE = "engine"
+INDEXNOW_KEY = re.compile(r"[A-Za-z0-9-]{8,128}")
 CATCHUP = {"latest", "all", "skip"}
 FORBIDDEN_ARGS = ("--bare", "--max-budget-usd")
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
@@ -335,7 +336,7 @@ def _check_project_jobs(project: Project, where: str, errors: list[str]) -> None
         if job.kind == "indexnow":
             if not project.site.get("indexable"):
                 errors.append(f"{where}: jobs.{job.id}: IndexNow needs [site] indexable = true")
-            if not re.match(r"^[A-Za-z0-9-]{8,128}$", str(job.params.get("key", ""))):
+            if not INDEXNOW_KEY.fullmatch(str(job.params.get("key", ""))):
                 errors.append(f"{where}: jobs.{job.id}: key must be 8-128 letters, digits or dashes")
 
 
