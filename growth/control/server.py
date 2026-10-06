@@ -27,6 +27,7 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import os
 import re
 import secrets as pysecrets
 import socket
@@ -67,6 +68,10 @@ class ControlServer(ThreadingHTTPServer):
             self.address_family = socket.AF_INET6
         super().__init__((host, port), Handler)
         self.home, self.token, self.demo = home, token, demo
+        if demo:
+            # A demo never reads or writes the machine's real secrets store, only its own throwaway one.
+            os.environ["GROWTH_CONFIG_DIR"] = str(home.root.parent / "config")
+            secrets.forget_cache()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -194,6 +199,8 @@ class Handler(BaseHTTPRequestHandler):
                 elif what == "legal":
                     ops.set_legal(home, ACTOR, pid, body)
                 elif what == "secret":
+                    if self.server.demo:
+                        raise ops.ControlError("the demo does not store connections")
                     ops.set_secret(home, ACTOR, pid, str(body.get("name", "")), body.get("value"))
                 else:
                     result = {"draft": ops.decide_draft(home, ACTOR, pid, str(body.get("id", "")), str(body.get("status", "")))}

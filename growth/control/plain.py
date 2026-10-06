@@ -94,7 +94,7 @@ def setup_steps(project: Any, registry: dict[str, Any]) -> list[dict[str, Any]]:
             "id": "legal",
             "title": "Fill in the legal notice",
             "why": "German law needs a name and address on the site before it collects sign-ups.",
-            "done": bool(legal) and all(str(v).strip() for v in legal.values()),
+            "done": all(str(legal.get(key, "")).strip() for key in ("name", "street", "postcode_city", "email")),
             "go": "edit-basics",
         },
         {

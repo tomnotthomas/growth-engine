@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .. import guard
-from ..config import ConfigError, Engine, load_engine, read_control, resolve_state_dir
+from ..config import ENGINE_SCOPE, ConfigError, Engine, load_engine, read_control, resolve_state_dir
 from ..util import write_json
 
 DRAFT_STATUSES = ("open", "approved", "rejected", "posted")
@@ -355,6 +355,8 @@ def add_project(home: Home, actor: str, pid: Any, name: Any, base_url: Any) -> N
 
     if not isinstance(pid, str) or not _ID.match(pid) or len(pid) > 40:
         raise ControlError("the project id is lower-case letters, digits and dashes, e.g. my-product")
+    if pid == ENGINE_SCOPE:
+        raise ControlError(f"{ENGINE_SCOPE!r} is reserved for the engine's own jobs")
     if not isinstance(name, str) or not name.strip() or len(name) > 80:
         raise ControlError("give the product a name")
     if not isinstance(base_url, str) or not re.fullmatch(r"https://[a-z0-9.-]+", base_url):
@@ -377,6 +379,9 @@ def add_project(home: Home, actor: str, pid: Any, name: Any, base_url: Any) -> N
     }
     for old, new in replacements.items():
         text = text.replace(old, new, 1)
+    # The template's operator is fictional; the owner fills in their own before the site is built.
+    for key, value in raw.get("legal", {}).items():
+        text = text.replace(f"{key} = {json.dumps(value)}", f'{key} = ""', 1)
     text = text.replace(f'[brand]\nname = "{raw["brand"]["name"]}"', f"[brand]\nname = {json.dumps(name.strip())}", 1)
     # A new project starts quiet: no submissions and no publishing until the owner turns them on.
     text = text.replace('[channels.directory-submit]\nenabled = true', '[channels.directory-submit]\nenabled = false', 1)

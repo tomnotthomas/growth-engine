@@ -3,8 +3,13 @@ the guided first run, and the rule that every server listens on loopback only.""
 
 from __future__ import annotations
 
+import http.client
+import json
 import os
+import shutil
 import socket
+import threading
+from unittest import mock
 
 from growth import guard, secrets
 from growth.control import ops
@@ -72,6 +77,23 @@ class Editing(HomeTestCase):
             ops.add_project(self.home_(), "captain", "my-shop", "Again", "https://x.com")
         with self.assertRaises(ops.ControlError):
             ops.add_project(self.home_(), "captain", "Bad Id", "x", "https://x.com")
+        with self.assertRaises(ops.ControlError):
+            ops.add_project(self.home_(), "captain", "engine", "Engine", "https://engine.com")
+        self.assertNotIn("engine", self.engine().projects)
+
+    def test_a_new_project_does_not_inherit_the_example_legal_notice(self) -> None:
+        ops.add_project(self.home_(), "captain", "my-shop", "My Shop", "https://my-shop.com")
+        self.assertEqual(set(self.project("my-shop").raw["legal"].values()), {""})
+
+        def legal_done() -> bool:
+            project = next(p for p in snapshot(self.engine())["projects"] if p["id"] == "my-shop")
+            return next(s for s in project["setup"] if s["id"] == "legal")["done"]
+
+        self.assertFalse(legal_done())
+        ops.set_legal(self.home_(), "captain", "my-shop", {"name": "Shop GmbH", "street": "Main St 2", "postcode_city": "10115 Berlin"})
+        self.assertFalse(legal_done())
+        ops.set_legal(self.home_(), "captain", "my-shop", {"email": "hi@my-shop.com"})
+        self.assertTrue(legal_done())
 
     def test_the_guided_first_run_moves_step_by_step(self) -> None:
         def next_step():
@@ -109,6 +131,25 @@ class LoopbackOnly(HomeTestCase):
             with socket.socket() as probe:
                 probe.settimeout(1)
                 self.assertNotEqual(probe.connect_ex((address, port)), 0, f"reachable on {address}")
+
+    def test_the_demo_server_never_touches_the_real_secrets_store(self) -> None:
+        secrets.put("CLOUDFLARE_ACCOUNT_ID", "real-acct")
+        real = secrets.config_dir()
+        demo_home = self.tmp / "demo" / "home"
+        shutil.copytree(self.home, demo_home)
+        server = ControlServer(0, ops.Home(demo_home), "demo", demo=True)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.assertNotIn("CLOUDFLARE_ACCOUNT_ID", secrets.load())
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=20)
+        conn.request("POST", "/api/projects/example/secret", body=json.dumps({"name": "CLOUDFLARE_ACCOUNT_ID", "value": "demo-acct"}),
+                     headers={"Authorization": "Bearer demo", "Content-Type": "application/json"})
+        self.assertEqual(conn.getresponse().status, 409)
+        conn.close()
+        self.assertEqual(secrets.load(), {})
+        with mock.patch.dict(os.environ, {"GROWTH_CONFIG_DIR": str(real)}):
+            self.assertEqual(secrets.load()["CLOUDFLARE_ACCOUNT_ID"], "real-acct")
 
     def test_the_demo_server_is_loopback_too(self) -> None:
         server = ControlServer(0, ops.Home(self.home), "demo", demo=True)
