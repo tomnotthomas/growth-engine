@@ -184,10 +184,10 @@ def run(ctx: Any) -> str:
     if launched and production.get("fingerprint") == fp:
         if production.get("status") == "promoted":
             return "up to date"
+        problems = smoke(base_url, paths, waitlist)
+        if problems:
+            raise DeployError(f"production still fails its live checks: {'; '.join(problems[:5])}")
         if production.get("status") == "failed":
-            problems = smoke(base_url, paths, waitlist)
-            if problems:
-                raise DeployError(f"production still fails its live checks: {'; '.join(problems[:5])}")
             state["production"] = {**production, "at": iso(ctx.now), "status": "promoted", "detail": "live checks pass again"}
             state["last_good"] = production["version_id"]
             _save(state_path, state, state["production"])

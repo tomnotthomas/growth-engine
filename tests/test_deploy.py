@@ -162,8 +162,23 @@ class Deploy(HomeTestCase):
         self.assertEqual(self.state()["production"]["status"], "rolled-back")
         self.assertEqual(self.state()["last_good"], first)
         # The rolled-back build is not pushed to production again.
+        self.failing = set()
         self.assertEqual(self.deploy(NOW.replace(hour=4)), "ok")
         self.assertEqual(len([c for c in self.calls() if c[:2] == ["versions", "deploy"]]), len(deploys))
+
+    def test_a_rollback_to_a_version_that_also_fails_is_reported_until_the_site_passes(self) -> None:
+        self.launch()
+        self.assertEqual(self.deploy(), "ok")
+        self.edit("projects/example/project.toml", 'name = "Kiln"\nwordmark', 'name = "Kiln Two"\nwordmark')
+        self.failing = {"https://kiln.example"}
+        self.assertEqual(self.deploy(NOW.replace(hour=3)), "failed")
+        self.assertIn("also fails", self.state()["production"]["detail"])
+        promotes = len([c for c in self.calls() if c[:2] == ["versions", "deploy"]])
+        self.assertEqual(self.deploy(NOW.replace(hour=4)), "failed", "a failing live site is never reported as success")
+        self.failing = set()
+        self.assertEqual(self.deploy(NOW.replace(hour=5)), "ok")
+        self.assertEqual(self.state()["production"]["status"], "rolled-back")
+        self.assertEqual(len([c for c in self.calls() if c[:2] == ["versions", "deploy"]]), promotes)
 
     def test_a_failed_first_production_deploy_is_rechecked_until_the_live_site_passes(self) -> None:
         self.launch()
