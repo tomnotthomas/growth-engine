@@ -87,7 +87,13 @@ jobs:
         run: |
           cp -R examples/home "$RUNNER_TEMP/home"
           python -m growth --home "$RUNNER_TEMP/home" serve --port 8799 > "$RUNNER_TEMP/serve.log" 2>&1 &
-          sleep 3
+          # A cold Python on the runner can take well over a few seconds to start: wait until the engine answers.
+          for i in $(seq 1 120); do
+            curl -sf http://127.0.0.1:8799/api/ping > /dev/null && break
+            [ "$i" = 120 ] && { echo "the engine did not answer within 60s"; cat "$RUNNER_TEMP/serve.log"; exit 1; }
+            sleep 0.5
+          done
+          echo "engine answered after ~$((i / 2))s"
           # The token comes from this step's own Python; a --token-command would run in the runner's login shell.
           "mac/build/Growth Engine.app/Contents/MacOS/GrowthEngine" --selftest --port 8799 \
             --token "$(python -m growth app-token)" || { cat "$RUNNER_TEMP/serve.log"; exit 1; }
