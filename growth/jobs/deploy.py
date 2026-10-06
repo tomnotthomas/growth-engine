@@ -178,15 +178,24 @@ def run(ctx: Any) -> str:
     state = read_json(state_path, {}) or {}
     fp = fingerprint(out)
     check, production = state.get("check") or {}, state.get("production") or {}
+    waitlist = "waitlist" in project.raw
+    paths = _smoke_paths(ctx.state_dir)
+    base_url = project.site["base_url"]
     if launched and production.get("fingerprint") == fp:
         if production.get("status") == "promoted":
             return "up to date"
+        if production.get("status") == "failed":
+            problems = smoke(base_url, paths, waitlist)
+            if problems:
+                raise DeployError(f"production still fails its live checks: {'; '.join(problems[:5])}")
+            state["production"] = {**production, "at": iso(ctx.now), "status": "promoted", "detail": "live checks pass again"}
+            state["last_good"] = production["version_id"]
+            _save(state_path, state, state["production"])
+            return f"live: {production['version_id']} on {base_url}"
         return f"this build was {production.get('status')} on production; waiting for a changed build"
 
     # 1. The local check: this machine only, nothing leaves it.
     command = list(engine.deploy.get("wrangler", WRANGLER))
-    waitlist = "waitlist" in project.raw
-    paths = _smoke_paths(ctx.state_dir)
     if not (check.get("fingerprint") == fp and check.get("status") == "checked"):
         problems = local_check(command, out, paths, waitlist)
         record = {"at": iso(ctx.now), "fingerprint": fp, "stage": "check", "url": "", "status": "failed" if problems else "checked"}
@@ -215,7 +224,7 @@ def run(ctx: Any) -> str:
         return f"version {uploaded['version']}"
 
     _act(ctx, "upload", fp, upload)
-    version, last_good, base_url = uploaded["version"], state.get("last_good"), project.site["base_url"]
+    version, last_good = uploaded["version"], state.get("last_good")
     record = {"at": iso(ctx.now), "fingerprint": fp, "version_id": version, "stage": "production", "url": base_url}
     _act(ctx, "production", fp, lambda: wrangler("versions", "deploy", f"{version}@100%", "--yes", "--message", f"growth-engine {fp[:12]}") and f"promoted {version}")
     problems = smoke(base_url, paths, waitlist)

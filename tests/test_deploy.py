@@ -165,6 +165,21 @@ class Deploy(HomeTestCase):
         self.assertEqual(self.deploy(NOW.replace(hour=4)), "ok")
         self.assertEqual(len([c for c in self.calls() if c[:2] == ["versions", "deploy"]]), len(deploys))
 
+    def test_a_failed_first_production_deploy_is_rechecked_until_the_live_site_passes(self) -> None:
+        self.launch()
+        self.failing = {"https://kiln.example"}
+        self.assertEqual(self.deploy(), "failed")
+        self.assertEqual(self.state()["production"]["status"], "failed")
+        self.assertNotIn("last_good", self.state())
+        promotes = len([c for c in self.calls() if c[:2] == ["versions", "deploy"]])
+        self.assertEqual(self.deploy(NOW.replace(hour=3)), "failed", "a failing live site is never reported as success")
+        self.failing = set()
+        self.assertEqual(self.deploy(NOW.replace(hour=4)), "ok")
+        production = self.state()["production"]
+        self.assertEqual(production["status"], "promoted")
+        self.assertEqual(self.state()["last_good"], production["version_id"])
+        self.assertEqual(len([c for c in self.calls() if c[:2] == ["versions", "deploy"]]), promotes)
+
     def test_production_needs_a_real_mail_provider_and_the_worker_secrets(self) -> None:
         self.launch()
         os.environ["FAKE_SECRETS"] = "STATS_TOKEN"

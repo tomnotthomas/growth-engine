@@ -66,7 +66,9 @@ After the launch go, the deploy job creates the D1 database on its first run and
 `state/projects/<id>/deploy.json`. The generated `wrangler.toml` sets `preview_urls = false`, so an
 uploaded version is never reachable on its own URL; the check before promoting is the local one, and
 the live smoke checks only read (`/api/waitlist/count`). A build checked before the launch goes live on
-the first deploy run after the switch is turned on.
+the first deploy run after the switch is turned on. If the very first production version fails its live
+checks there is nothing to roll back to, so it stays live; every later run checks the domain again and
+reports the deploy failed until the checks pass (for example once the domain points at the Worker).
 
 Until `EMAIL_API_KEY` exists, the Worker answers sign-ups with "opens soon" and stores nothing.
 
