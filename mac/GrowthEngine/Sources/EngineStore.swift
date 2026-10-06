@@ -17,6 +17,8 @@ struct ConnectionSettings: Codable, Equatable {
     var tokenCommand: String = "cd ~/growth-engine && python3 -m growth app-token"
     var localPort: Int = 8765
     var localToken: String = "demo"
+    /// For an engine on this Mac: a command that prints its token (e.g. `growth app-token`); empty uses the token above.
+    var localTokenCommand: String = ""
 
     static let key = "connection"
 
@@ -24,6 +26,22 @@ struct ConnectionSettings: Codable, Equatable {
         guard let data = UserDefaults.standard.data(forKey: key),
               let value = try? JSONDecoder().decode(ConnectionSettings.self, from: data) else { return ConnectionSettings() }
         return value
+    }
+
+    init() {}
+
+    // Settings saved by an older version miss newer keys; every key falls back to its default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = ConnectionSettings()
+        mode = (try? c.decode(Mode.self, forKey: .mode)) ?? d.mode
+        sshAlias = (try? c.decode(String.self, forKey: .sshAlias)) ?? d.sshAlias
+        remotePort = (try? c.decode(Int.self, forKey: .remotePort)) ?? d.remotePort
+        tunnelPort = (try? c.decode(Int.self, forKey: .tunnelPort)) ?? d.tunnelPort
+        tokenCommand = (try? c.decode(String.self, forKey: .tokenCommand)) ?? d.tokenCommand
+        localPort = (try? c.decode(Int.self, forKey: .localPort)) ?? d.localPort
+        localToken = (try? c.decode(String.self, forKey: .localToken)) ?? d.localToken
+        localTokenCommand = (try? c.decode(String.self, forKey: .localTokenCommand)) ?? d.localTokenCommand
     }
 
     func save() {
@@ -170,7 +188,9 @@ final class EngineStore {
 
     private func ensureConnected() async throws {
         if settings.mode == .local {
-            token = settings.localToken
+            if token == nil {
+                token = settings.localTokenCommand.isEmpty ? settings.localToken : try await runForToken(["/bin/zsh", "-lc", settings.localTokenCommand])
+            }
             return
         }
         if tunnel?.isRunning != true {
@@ -208,15 +228,17 @@ final class EngineStore {
     }
 
     private func fetchToken() async throws -> String {
-        let alias = settings.sshAlias
-        let command = settings.tokenCommand
-        let options = sshOptions
+        try await runForToken(["/usr/bin/ssh"] + sshOptions + [settings.sshAlias, settings.tokenCommand])
+    }
+
+    /// Run a command whose only output is the engine's login token.
+    private func runForToken(_ argv: [String]) async throws -> String {
         return try await Task.detached {
             let p = Process()
             let out = Pipe()
             let err = Pipe()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
-            p.arguments = options + [alias, command]
+            p.executableURL = URL(fileURLWithPath: argv[0])
+            p.arguments = Array(argv.dropFirst())
             p.standardInput = FileHandle.nullDevice
             p.standardOutput = out
             p.standardError = err
@@ -316,6 +338,29 @@ final class EngineStore {
         await control("settings:\(project)", "/api/projects/\(project)/settings", body)
     }
     func setBudget(_ body: [String: Any]) async -> Bool { await control("budget", "/api/budget", body) }
+    func setSchedule(_ project: String, _ job: String, _ schedule: String) async -> Bool {
+        await control("schedule:\(project)/\(job)", "/api/projects/\(project)/schedule", ["job": job, "schedule": schedule])
+    }
+    func setPageText(_ project: String, _ page: PageText) async -> Bool {
+        await control("page:\(project)/\(page.id)", "/api/projects/\(project)/page",
+                      ["page": page.page, "lang": page.lang, "title": page.title, "description": page.description,
+                       "headline": page.headline, "sub": page.sub])
+    }
+    func setLegal(_ project: String, _ values: [String: String]) async -> Bool {
+        await control("legal:\(project)", "/api/projects/\(project)/legal", values)
+    }
+    func setSecret(_ project: String, _ name: String, _ value: String) async -> Bool {
+        await control("secret:\(name)", "/api/projects/\(project)/secret", ["name": name, "value": value])
+    }
+    func addProject(id: String, name: String, address: String) async -> Bool {
+        let ok = await control("add-project", "/api/projects", ["id": id, "name": name, "base_url": address])
+        if ok { selectedProjectID = id }
+        return ok
+    }
+    /// Refresh the product data and rebuild the website now (one engine process, under its lock).
+    func buildNow(_ project: String) async {
+        await control("build:\(project)", "/api/projects/\(project)/build", [:])
+    }
 }
 
 enum EngineError: Error {

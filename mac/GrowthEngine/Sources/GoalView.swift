@@ -11,25 +11,24 @@ struct GoalView: View {
                     GoalSummary(project: project, onOpen: {})
                     if let goal = project.goal, !goal.daily.isEmpty {
                         Panel {
-                            SectionTitle("Confirmed per day", trailing: goal.neededPerDay.map { "Needed: \(Fmt.number($0)) a day" })
+                            SectionTitle("Sign-ups per day", trailing: goal.neededPerDay.map { "Needed from now on: \(Fmt.number($0)) a day" })
                             DailyChart(points: goal.daily, needed: goal.neededPerDay).frame(height: 180)
                         }
                         HStack(alignment: .top, spacing: 18) {
                             Panel {
-                                SectionTitle("By channel", trailing: "all time")
+                                SectionTitle("Where they came from", trailing: "all time")
                                 BreakdownList(rows: goal.channels.map { ($0.source.capitalized, $0.confirmed, true) })
                             }
                             Panel {
-                                SectionTitle("By country", trailing: goal.zone.map { "counting \($0)" })
+                                SectionTitle("Countries", trailing: goal.zone.map { "only \($0) count" })
                                 BreakdownList(rows: goal.countries.map { ($0.country, $0.confirmed, $0.inZone) })
                                 if let outside = goal.outsideZone, outside > 0 {
-                                    Text("\(Fmt.number(outside)) confirmed outside the zone are not counted toward the goal.")
+                                    Text("\(Fmt.number(outside)) sign-ups from other countries are not counted toward the goal.")
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                         }
                     }
-                    GoalEditor(project: project)
                 }
                 .padding(24)
                 .frame(maxWidth: 1180, alignment: .leading)
@@ -88,69 +87,5 @@ struct BreakdownList: View {
                 }
             }
         }
-    }
-}
-
-struct GoalEditor: View {
-    @Environment(EngineStore.self) private var store
-    var project: Project
-    @State private var target = ""
-    @State private var start = ""
-    @State private var days = ""
-    @State private var countries = ""
-    @State private var loadedFor = ""
-
-    var body: some View {
-        Panel {
-            SectionTitle("Targets")
-            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 10) {
-                GridRow {
-                    Text("Target").foregroundStyle(.secondary)
-                    TextField("5000", text: $target).frame(width: 120).figures()
-                    Text("confirmed sign-ups").foregroundStyle(.secondary)
-                }
-                GridRow {
-                    Text("Start").foregroundStyle(.secondary)
-                    TextField("YYYY-MM-DD", text: $start).frame(width: 120).figures()
-                    Text("the launch day; empty keeps the clock stopped").foregroundStyle(.secondary)
-                }
-                GridRow {
-                    Text("Days").foregroundStyle(.secondary)
-                    TextField("46", text: $days).frame(width: 120).figures()
-                    Text("from the start to the deadline").foregroundStyle(.secondary)
-                }
-                GridRow {
-                    Text("Countries").foregroundStyle(.secondary)
-                    TextField("DE, AT, CH", text: $countries).frame(width: 120)
-                    Text("only these count toward the goal; empty counts all").foregroundStyle(.secondary)
-                }
-            }
-            .font(.callout)
-            HStack {
-                Spacer()
-                Button("Save targets") { Task { await save() } }
-                    .disabled(store.working.contains("goal:\(project.id)") || !store.link.isOnline)
-                    .keyboardShortcut("s")
-            }
-        }
-        .onAppear(perform: load)
-        .onChange(of: project.id) { load() }
-    }
-
-    private func load() {
-        guard loadedFor != project.id else { return }
-        loadedFor = project.id
-        target = project.goal.map { String($0.target) } ?? ""
-        start = project.goal?.start ?? ""
-        days = project.goal?.days.map(String.init) ?? ""
-        countries = project.goal?.zone ?? ""
-    }
-
-    private func save() async {
-        var body: [String: Any] = ["start": start.trimmingCharacters(in: .whitespaces)]
-        if let t = Int(target.filter(\.isNumber)) { body["target"] = t }
-        if let d = Int(days.filter(\.isNumber)) { body["days"] = d }
-        body["zone"] = countries.split(whereSeparator: { $0 == "," || $0 == " " }).map { String($0).uppercased() }
-        if await store.setGoal(project.id, body) { loadedFor = "" ; load() }
     }
 }

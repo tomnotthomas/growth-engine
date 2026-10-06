@@ -29,6 +29,7 @@ import json
 import logging
 import re
 import secrets as pysecrets
+import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -44,7 +45,8 @@ TOKEN_NAME = "APP_TOKEN"
 DEMO_TOKEN = "demo"
 ACTOR = "captain"
 MAX_BODY = 64 * 1024
-_PROJECT = re.compile(r"^/api/projects/([a-z0-9][a-z0-9-]*)/(pause|channel|goal|settings|draft)$")
+_PROJECT = re.compile(r"^/api/projects/([a-z0-9][a-z0-9-]*)/(pause|channel|goal|settings|draft|schedule|page|legal|secret|build)$")
+LOOPBACK = ("127.0.0.1", "::1")
 
 
 def app_token(create: bool = True) -> str:
@@ -57,8 +59,13 @@ def app_token(create: bool = True) -> str:
 class ControlServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, port: int, home: ops.Home, token: str, *, demo: bool = False):
-        super().__init__(("127.0.0.1", port), Handler)
+    def __init__(self, port: int, home: ops.Home, token: str, *, demo: bool = False, host: str = "127.0.0.1"):
+        # Loopback only, always: the Mac reaches this through an SSH tunnel, never over the network.
+        if host not in LOOPBACK:
+            raise ValueError(f"the control API only listens on loopback (127.0.0.1 or ::1), not {host!r}")
+        if host == "::1":
+            self.address_family = socket.AF_INET6
+        super().__init__((host, port), Handler)
         self.home, self.token, self.demo = home, token, demo
 
 
@@ -165,6 +172,8 @@ class Handler(BaseHTTPRequestHandler):
                 ops.set_job(home, ACTOR, str(body.get("scope", "")), str(body.get("job", "")), body.get("enabled"))
             elif path == "/api/budget":
                 ops.set_budget(home, ACTOR, body)
+            elif path == "/api/projects":
+                ops.add_project(home, ACTOR, body.get("id"), body.get("name"), body.get("base_url"))
             elif match := _PROJECT.match(path):
                 pid, what = match.groups()
                 if what == "pause":
@@ -175,6 +184,17 @@ class Handler(BaseHTTPRequestHandler):
                     ops.set_goal(home, ACTOR, pid, body)
                 elif what == "settings":
                     ops.set_settings(home, ACTOR, pid, body)
+                elif what == "schedule":
+                    ops.set_schedule(home, ACTOR, pid, str(body.get("job", "")), body.get("schedule"))
+                elif what == "page":
+                    ops.set_page_text(home, ACTOR, pid, str(body.get("page", "")), str(body.get("lang", "")),
+                                      {k: v for k, v in body.items() if k not in ("page", "lang")})
+                elif what == "build":
+                    result = {"pid": ops.build_now(home, ACTOR, pid)}
+                elif what == "legal":
+                    ops.set_legal(home, ACTOR, pid, body)
+                elif what == "secret":
+                    ops.set_secret(home, ACTOR, pid, str(body.get("name", "")), body.get("value"))
                 else:
                     result = {"draft": ops.decide_draft(home, ACTOR, pid, str(body.get("id", "")), str(body.get("status", "")))}
             else:

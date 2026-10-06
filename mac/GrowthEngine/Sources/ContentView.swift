@@ -1,111 +1,118 @@
 import SwiftUI
 
 enum Page: String, CaseIterable, Identifiable, Hashable {
-    case overview, goal, queue, jobs, channels, activity, project, engine, audit
+    case start, schedule, queue, results, edit, safety, health, audit
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .overview: return "Overview"
-        case .goal: return "Goal"
+        case .start: return "Start here"
+        case .schedule: return "What it does and when"
         case .queue: return "Waiting for you"
-        case .jobs: return "Jobs"
-        case .channels: return "Channels"
-        case .activity: return "Activity"
-        case .project: return "Project settings"
-        case .engine: return "Engine"
-        case .audit: return "Audit log"
+        case .results: return "Results"
+        case .edit: return "Edit project"
+        case .safety: return "Safety and limits"
+        case .health: return "Engine health"
+        case .audit: return "Activity record"
+        }
+    }
+
+    var short: String {
+        switch self {
+        case .schedule: return "Schedule"
+        default: return title
         }
     }
 
     var symbol: String {
         switch self {
-        case .overview: return "square.grid.2x2"
-        case .goal: return "chart.line.uptrend.xyaxis"
+        case .start: return "flag"
+        case .schedule: return "calendar.badge.clock"
         case .queue: return "tray.full"
-        case .jobs: return "clock.arrow.2.circlepath"
-        case .channels: return "dot.radiowaves.left.and.right"
-        case .activity: return "list.bullet.rectangle"
-        case .project: return "slider.horizontal.3"
-        case .engine: return "cpu"
-        case .audit: return "checkmark.shield"
+        case .results: return "chart.line.uptrend.xyaxis"
+        case .edit: return "pencil"
+        case .safety: return "hand.raised"
+        case .health: return "stethoscope"
+        case .audit: return "list.bullet.rectangle"
         }
     }
 }
 
 struct ContentView: View {
     @Environment(EngineStore.self) private var store
-    @State private var section: Page? = .overview
+    @State private var section: Page?
+    @State private var editTab = "basics"
     @State private var killSheet = false
+    @AppStorage("showMore") private var showMore = false
+
+    init(initialPage: Page = .start) {
+        _section = State(initialValue: initialPage)
+    }
 
     var body: some View {
         NavigationSplitView {
             List(selection: $section) {
-                Section("Project") {
-                    ForEach([Page.overview, .goal, .queue, .jobs, .channels, .activity, .project]) { item in
-                        row(item)
-                    }
+                Section {
+                    ForEach([Page.start, .schedule, .queue, .results, .edit]) { row($0) }
                 }
-                Section("Engine") {
-                    ForEach([Page.engine, .audit]) { item in row(item) }
+                Section("More", isExpanded: $showMore) {
+                    ForEach([Page.safety, .health, .audit]) { row($0) }
                 }
             }
-            .navigationSplitViewColumnWidth(min: 190, ideal: 210)
+            .safeAreaInset(edge: .top) { ProjectSwitcher().padding(.horizontal, 10).padding(.top, 6) }
+            .navigationSplitViewColumnWidth(min: 210, ideal: 230)
             .safeAreaInset(edge: .bottom) { ConnectionFooter().padding(12) }
         } detail: {
             Group {
-                if let dashboard = store.dashboard {
-                    detail(dashboard)
+                if store.dashboard != nil {
+                    detail
                 } else {
                     FirstConnectView()
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) { Banners(killSheet: $killSheet) }
-            .navigationTitle(section?.title ?? "Growth Engine")
-            .navigationSubtitle(store.project?.name ?? "")
+            .navigationTitle(section?.short ?? "Growth Engine")
         }
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                if let projects = store.dashboard?.projects, projects.count > 1 {
-                    Picker("Project", selection: Binding(get: { store.selectedProjectID ?? "" }, set: { store.selectedProjectID = $0 })) {
-                        ForEach(projects) { Text($0.name).tag($0.id) }
-                    }
-                    .pickerStyle(.menu)
-                }
+            ToolbarItem(placement: .primaryAction) {
                 Button { Task { await store.refresh() } } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                     .help("Fetch the latest state now (⌘R)")
-                KillSwitchButton(killSheet: $killSheet)
             }
         }
         .sheet(isPresented: $killSheet) { KillSwitchSheet() }
         .alert(item: Binding(get: { store.failure }, set: { store.failure = $0 })) { failure in
-            Alert(title: Text("The engine refused this"), message: Text(failure.message), dismissButton: .default(Text("OK")))
+            Alert(title: Text("That did not work"), message: Text(failure.message), dismissButton: .default(Text("OK")))
         }
     }
 
+    private func go(_ page: Page, _ tab: String?) {
+        if let tab { editTab = tab }
+        if [.safety, .health, .audit].contains(page) { showMore = true }
+        section = page
+    }
+
     private func row(_ item: Page) -> some View {
-        Label(item.title, systemImage: item.symbol)
+        Label(item.short, systemImage: item.symbol)
             .badge(item == .queue ? store.waitingCount : 0)
             .tag(item)
     }
 
     @ViewBuilder
-    private func detail(_ dashboard: Dashboard) -> some View {
+    private var detail: some View {
         let dimmed = !store.link.isOnline
         Group {
-            switch section ?? .overview {
-            case .overview: OverviewView(dashboard: dashboard, go: { section = $0 })
-            case .goal: GoalView()
+            switch section ?? .start {
+            case .start: StartHereView(go: go)
+            case .schedule: ScheduleView(go: go)
             case .queue: QueueView()
-            case .jobs: JobsView()
-            case .channels: ChannelsView()
-            case .activity: ActivityView(dashboard: dashboard)
-            case .project: ProjectSettingsView()
-            case .engine: EngineView()
+            case .results: GoalView()
+            case .edit: EditView(tab: $editTab)
+            case .safety: SafetyView(killSheet: $killSheet)
+            case .health: EngineView()
             case .audit: AuditView()
             }
         }
-        .disabled(dimmed && section != .overview && section != .activity && section != .goal)
+        .disabled(dimmed && ![.start, .schedule, .results].contains(section ?? .start))
         .opacity(dimmed ? 0.62 : 1)
         .animation(.easeOut(duration: 0.2), value: dimmed)
     }
@@ -120,9 +127,9 @@ struct Banners: View {
         VStack(spacing: 0) {
             if let kill = store.dashboard?.engine.kill, kill.on {
                 banner(color: Theme.killFill, symbol: "stop.circle.fill",
-                       title: "Kill switch is on. Nothing runs, deploys, updates or posts.",
+                       title: "The engine is stopped. Nothing runs, publishes, updates or posts.",
                        detail: "Since \(Fmt.clock(kill.at)) by \(kill.by ?? "?")\(kill.reason.map { ": \($0)" } ?? "")",
-                       action: ("Turn off…", { killSheet = true }), ink: .white)
+                       action: ("Resume…", { killSheet = true }), ink: .white)
             }
             switch store.link {
             case .offline(let why):
@@ -138,9 +145,14 @@ struct Banners: View {
                 EmptyView()
             }
             if store.dashboard?.demo == true {
-                banner(color: Theme.limeFill, symbol: "theatermasks",
-                       title: "Demo data. Nothing here is real.",
-                       detail: "Served by `growth serve --demo` from the fictional example project.", action: nil, ink: Theme.onLime)
+                HStack(spacing: 8) {
+                    StatusDot(color: Theme.limeFill, size: 7)
+                    Text("Demo: made-up example data. Changes here are thrown away.").font(.caption)
+                    Spacer()
+                }
+                .padding(.horizontal, 18).padding(.vertical, 6)
+                .background(Theme.panel)
+                .overlay(alignment: .bottom) { Rectangle().fill(Theme.hairline).frame(height: 1) }
             }
         }
     }
@@ -197,7 +209,7 @@ struct ConnectionFooter: View {
 
     private var title: String {
         switch store.link {
-        case .online: return "\(store.settings.place) online"
+        case .online: return store.dashboard?.engine.healthy == true ? "\(store.settings.place): running" : "\(store.settings.place): scheduler idle"
         case .connecting: return "Connecting…"
         case .offline: return "\(store.settings.place) offline"
         case .locked: return "Not logged in"

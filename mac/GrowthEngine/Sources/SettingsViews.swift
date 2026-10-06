@@ -1,100 +1,5 @@
 import SwiftUI
 
-// MARK: Project settings: brand, domain, keywords, the launch switch
-
-struct ProjectSettingsView: View {
-    @Environment(EngineStore.self) private var store
-    @State private var brand = ""
-    @State private var baseURL = ""
-    @State private var domainDecided = false
-    @State private var indexable = false
-    @State private var keywords: [Keyword] = []
-    @State private var loadedFor = ""
-    @State private var confirmLaunch = false
-
-    var body: some View {
-        if let project = store.project {
-            Form {
-                Section {
-                    LaunchRow(project: project, confirm: $confirmLaunch)
-                } header: { Text("Launch") }
-
-                Section {
-                    TextField("Brand name", text: $brand)
-                    TextField("Site address", text: $baseURL, prompt: Text("https://example.com"))
-                    Toggle("Domain decided", isOn: $domainDecided)
-                    Toggle("Search engines may index the site", isOn: $indexable)
-                } header: { Text("Brand and domain") } footer: {
-                    Text("Indexing needs the decided domain and the legal-notice and privacy pages; the engine refuses anything else.")
-                        .foregroundStyle(.secondary)
-                }
-
-                Section {
-                    ForEach($keywords) { $kw in
-                        HStack {
-                            Text(kw.page).foregroundStyle(.secondary).frame(width: 110, alignment: .leading)
-                            TextField("Primary keyword", text: $kw.primary)
-                        }
-                    }
-                } header: { Text("Keywords") } footer: {
-                    Text("Each page's primary keyword must appear in that page's title and heading, or the save is refused.")
-                        .foregroundStyle(.secondary)
-                }
-
-                Section {
-                    DeploySummary(deploy: project.deploy, launched: project.launched)
-                } header: { Text("Deploys") }
-            }
-            .formStyle(.grouped)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save settings") { Task { await save(project) } }
-                        .disabled(!dirty(project) || store.working.contains("settings:\(project.id)") || !store.link.isOnline)
-                        .keyboardShortcut("s")
-                }
-            }
-            .onAppear { load(project) }
-            .onChange(of: project.id) { load(project) }
-            .confirmationDialog("Launch \(project.name)?", isPresented: $confirmLaunch) {
-                Button("Launch: allow production deploys") { Task { _ = await store.setSettings(project.id, ["launched": true]) } }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("The next deploy that passes its local check goes live on \(project.baseUrl). This is the go the engine waits for; it is recorded in the audit log.")
-            }
-        }
-    }
-
-    private func load(_ p: Project) {
-        guard loadedFor != p.id + p.brandName + p.baseUrl else { return }
-        loadedFor = p.id + p.brandName + p.baseUrl
-        brand = p.brandName
-        baseURL = p.baseUrl
-        domainDecided = p.domainDecided
-        indexable = p.indexable
-        keywords = p.keywords
-    }
-
-    private func dirty(_ p: Project) -> Bool {
-        brand != p.brandName || baseURL != p.baseUrl || domainDecided != p.domainDecided || indexable != p.indexable || keywords != p.keywords
-    }
-
-    private func save(_ p: Project) async {
-        var body: [String: Any] = [:]
-        if brand != p.brandName { body["brand_name"] = brand }
-        if baseURL != p.baseUrl { body["base_url"] = baseURL }
-        if domainDecided != p.domainDecided { body["domain_decided"] = domainDecided }
-        if indexable != p.indexable { body["indexable"] = indexable }
-        if keywords != p.keywords {
-            body["keywords"] = keywords.map { k -> [String: Any] in
-                var row: [String: Any] = ["page": k.page, "primary": k.primary]
-                if let lang = k.lang { row["lang"] = lang }
-                return row
-            }
-        }
-        if await store.setSettings(p.id, body) { loadedFor = "" }
-    }
-}
-
 struct LaunchRow: View {
     @Environment(EngineStore.self) private var store
     var project: Project
@@ -105,19 +10,19 @@ struct LaunchRow: View {
             Image(systemName: project.launched ? "airplane.departure" : "lock.shield")
                 .font(.title2).foregroundStyle(project.launched ? Theme.accent : .secondary).frame(width: 30)
             VStack(alignment: .leading, spacing: 2) {
-                Text(project.launched ? "Launched: production deploys are on" : "Not launched: nothing goes public").font(.callout.weight(.semibold))
-                Text(project.launched ? "Deploys pass a local check, go live, and roll back on their own if the live checks fail."
-                                      : "Deploys are only checked on the engine's own machine; nothing is uploaded. Production waits for this switch.")
+                Text(project.launched ? "Launched: the website is online" : "Not launched: nothing is online").font(.callout.weight(.semibold))
+                Text(project.launched ? "Each change is checked, put online, and undone on its own if the live check fails."
+                                      : "Nothing is uploaded: the engine only checks the website on its own computer. Going online waits for this switch.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             if project.launched {
-                Button("Stop production deploys") { Task { _ = await store.setSettings(project.id, ["launched": false]) } }
+                Button("Take back the launch") { Task { _ = await store.setSettings(project.id, ["launched": false]) } }
             } else {
                 Button("Launch…") { confirm = true }
                     .buttonStyle(.borderedProminent).tint(Theme.accent)
                     .disabled(!project.domainDecided)
-                    .help(project.domainDecided ? "Allow production deploys" : "Decide the domain first")
+                    .help(project.domainDecided ? "Put the website online" : "Mark the web address as final under Basics first")
             }
         }
         .disabled(store.working.contains("settings:\(project.id)") || !store.link.isOnline)
@@ -133,7 +38,7 @@ struct DeploySummary: View {
             row("Local check", deploy.check)
             row("Production", deploy.production)
             if deploy.check == nil && deploy.production == nil {
-                Text("No deploy yet. The deploy job checks the site locally whenever the built site changes.")
+                Text("Nothing published yet. Once publishing is on, every rebuilt site is checked here first.")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }

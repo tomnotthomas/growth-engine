@@ -21,7 +21,8 @@ from ..config import ENGINE_SCOPE, Engine, Project
 from ..goal import goal_report, in_zone
 from ..jobs import JOB_KINDS
 from ..queue import Draft
-from ..site.spec import load_keywords
+from ..site.spec import load_keywords, load_pages, page_text
+from . import plain
 from ..store import FAILED, INTERRUPTED, MISSED, Store
 from ..util import iso, parse_iso, read_json, utcnow, write_json
 
@@ -138,10 +139,15 @@ def _jobs(engine: Engine, project: Project | None, store: Store, now: datetime) 
         mine = [r for r in runs if r.job == job.id and r.status != MISSED]
         last = mine[-1] if mine else None
         paused = bool(project and (project.paused or (kind.channel and project.channels.get(kind.channel, {}).get("paused"))))
+        words = plain.job_words(job.kind)
         out.append(
             {
                 "id": job.id,
                 "kind": job.kind,
+                "name": words["name"],
+                "does": words["does"],
+                "produces": words["produces"],
+                "when": plain.schedule_words(job.schedule.text),
                 "description": kind.description,
                 "schedule": job.schedule.text,
                 "enabled": job.enabled,
@@ -176,6 +182,26 @@ def _channels(engine: Engine, project: Project, store: Store, now: datetime) -> 
     return out
 
 
+def _pages(project: Project) -> list[dict[str, Any]]:
+    out = []
+    for pid, spec in load_pages(project).items():
+        if spec.kind == "item":
+            continue  # item pages are generated from product data, not edited by hand
+        for lang, page in spec.langs.items():
+            out.append({"page": pid, "lang": lang, "path": page.path, **page_text(page)})
+    return sorted(out, key=lambda p: (p["path"].count("/"), p["path"]))
+
+
+def _connections(project: Project) -> list[dict[str, Any]]:
+    from .. import secrets
+
+    try:
+        stored = set(secrets.load())
+    except secrets.SecretsError:
+        stored = set()
+    return [{"name": name, "set": name in stored} for name in plain.settable_secrets(project)]
+
+
 def _drafts(engine: Engine, project: Project) -> list[dict[str, Any]]:
     import json
 
@@ -207,6 +233,7 @@ def snapshot(engine: Engine, *, now: datetime | None = None, demo: bool = False)
             today = now.astimezone(project.tz).date()
             drafts = _drafts(engine, project)
             jobs = _jobs(engine, project, store, now)
+            setup = plain.setup_steps(project, read_json(engine.state_dir / "projects" / project.id / "site-registry.json", {}) or {})
             problems = [
                 {"job": r.job, "status": r.status, "at": r.finished_at or r.slot, "summary": r.summary[:400]}
                 for r in store.runs_since(now - timedelta(days=2), project.id)
@@ -239,15 +266,22 @@ def snapshot(engine: Engine, *, now: datetime | None = None, demo: bool = False)
                     "blocks": blocks[-10:],
                     "deploy": read_json(engine.state_dir / "projects" / project.id / "deploy.json", {}) or {},
                     "keywords": load_keywords(project),
+                    "setup": setup,
+                    "next_step": next((step for step in setup if not step["done"]), None),
+                    "pages": _pages(project),
+                    "legal": {k: str(project.raw.get("legal", {}).get(k, "")) for k in ("name", "street", "postcode_city", "country", "email")},
+                    "connections": _connections(project),
                 }
             )
         upcoming = []
         for p in projects:
-            upcoming += [{"at": j["next_at"], "scope": p["id"], "job": j["id"], "kind": j["kind"]} for j in p["jobs"] if j["next_at"]]
+            upcoming += [{"at": j["next_at"], "scope": p["id"], "job": j["id"], "kind": j["kind"], "name": j["name"], "does": j["does"]} for j in p["jobs"] if j["next_at"]]
         engine_jobs = _jobs(engine, None, store, now)
-        upcoming += [{"at": j["next_at"], "scope": ENGINE_SCOPE, "job": j["id"], "kind": j["kind"]} for j in engine_jobs if j["next_at"]]
+        upcoming += [{"at": j["next_at"], "scope": ENGINE_SCOPE, "job": j["id"], "kind": j["kind"], "name": j["name"], "does": j["does"]} for j in engine_jobs if j["next_at"]]
+        kinds = {(p["id"], j["id"]): j["kind"] for p in projects for j in p["jobs"]} | {(ENGINE_SCOPE, j["id"]): j["kind"] for j in engine_jobs}
         activity = [
-            {"at": r.finished_at or r.started_at or r.slot, "scope": r.scope, "job": r.job, "status": r.status, "summary": r.summary[:300]}
+            {"at": r.finished_at or r.started_at or r.slot, "scope": r.scope, "job": r.job, "status": r.status, "summary": r.summary[:300],
+             "name": plain.job_words(kinds.get((r.scope, r.job), r.job))["name"]}
             for r in store.runs_since(now - timedelta(days=3))
         ][-60:]
         since_day, since_week = now - timedelta(days=1), now - timedelta(days=7)

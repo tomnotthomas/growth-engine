@@ -269,3 +269,141 @@ def run_now(home: Home, actor: str, scope: str, job: str) -> int:
 def set_kill(home: Home, actor: str, on: Any, reason: str) -> dict[str, Any] | None:
     # Works even when the configuration does not load: stopping must always be possible.
     return guard.set_kill(home.state(), _bool(on, "on"), reason=str(reason or "")[:300], actor=actor)
+
+
+# ---- editing a project: schedule, website text, legal notice, connections, new projects -----------
+
+def set_schedule(home: Home, actor: str, scope: str, job: str, schedule: Any) -> None:
+    """Change when a job runs ("every 6h", "daily 04:00", "weekly sun 03:00")."""
+    from ..schedule import parse_schedule
+
+    engine = home.engine()
+    jobs = engine.jobs if scope == "engine" else _project(engine, scope).jobs
+    if job not in jobs:
+        raise ControlError(f"{scope} has no job {job!r}")
+    try:
+        parse_schedule(str(schedule))
+    except ValueError as exc:
+        raise ControlError(str(exc)) from None
+    path = ["engine", "jobs", job, "schedule"] if scope == "engine" else ["projects", scope, "jobs", job, "schedule"]
+    change(home, actor, "schedule", [(path, str(schedule))], scope=scope)
+
+
+PAGE_TEXT_KEYS = ("title", "description", "headline", "sub")
+
+
+def set_page_text(home: Home, actor: str, pid: str, page: str, lang: str, values: dict[str, Any]) -> None:
+    """Edit a page's title, description, main heading and subline in one language."""
+    from ..site.spec import load_pages
+
+    project = _project(home.engine(), pid)
+    pages = load_pages(project)
+    if page not in pages or lang not in pages[page].langs:
+        raise ControlError(f"{pid} has no page {page!r} in {lang!r}")
+    changes = []
+    for key, value in values.items():
+        if key not in PAGE_TEXT_KEYS:
+            raise ControlError(f"{key!r} cannot be edited here (allowed: {', '.join(PAGE_TEXT_KEYS)})")
+        if not isinstance(value, str) or len(value) > 2000:
+            raise ControlError(f"{key} must be text of at most 2000 characters")
+        changes.append((["projects", pid, "pages", page, lang, key], value))
+    if not changes:
+        raise ControlError("nothing to change")
+    change(home, actor, "page-text", changes, scope=pid)
+
+
+LEGAL_KEYS = ("name", "street", "postcode_city", "country", "email")
+
+
+def set_legal(home: Home, actor: str, pid: str, values: dict[str, Any]) -> None:
+    _project(home.engine(), pid)
+    changes = []
+    for key, value in values.items():
+        if key not in LEGAL_KEYS or not isinstance(value, str) or len(value) > 300:
+            raise ControlError(f"legal notice fields are {', '.join(LEGAL_KEYS)}, as text")
+        changes.append((["projects", pid, "legal", key], value.strip()))
+    if not changes:
+        raise ControlError("nothing to change")
+    change(home, actor, "legal", changes, scope=pid)
+
+
+def set_secret(home: Home, actor: str, pid: str, name: str, value: Any) -> None:
+    """Store a connection secret (encrypted). Only the names the project uses; the value is never echoed or logged."""
+    from .. import secrets
+    from .plain import settable_secrets
+
+    project = _project(home.engine(), pid)
+    if name not in settable_secrets(project):
+        raise ControlError(f"{name!r} is not a secret this project uses")
+    if not isinstance(value, str) or not value.strip() or len(value) > 4096 or any(c.isspace() for c in value.strip()):
+        raise ControlError("paste the value as one line")
+    try:
+        secrets.put(name, value.strip())
+    except secrets.SecretsError as exc:
+        raise ControlError(str(exc)) from None
+    guard.audit(home.state(), actor, "control.secret", scope=pid, name=name)
+
+
+TEMPLATE = Path(__file__).resolve().parents[2] / "examples" / "home" / "projects" / "example"
+
+
+def add_project(home: Home, actor: str, pid: Any, name: Any, base_url: Any) -> None:
+    """Start a project from the example template, renamed; everything that acts outward starts switched off."""
+    import shutil
+
+    from ..util import read_toml
+
+    if not isinstance(pid, str) or not _ID.match(pid) or len(pid) > 40:
+        raise ControlError("the project id is lower-case letters, digits and dashes, e.g. my-product")
+    if not isinstance(name, str) or not name.strip() or len(name) > 80:
+        raise ControlError("give the product a name")
+    if not isinstance(base_url, str) or not re.fullmatch(r"https://[a-z0-9.-]+", base_url):
+        raise ControlError("the web address looks like https://my-product.com (no path)")
+    engine = home.engine()
+    folder = engine.root / "projects" / pid
+    if folder.exists():
+        raise ControlError(f"a project folder {pid!r} already exists")
+    shutil.copytree(TEMPLATE, folder)
+    text = (folder / "project.toml").read_text(encoding="utf-8")
+    raw = read_toml(folder / "project.toml")
+    replacements = {
+        f'id = "{raw["id"]}"': f'id = "{pid}"',
+        f'name = "{raw["name"]}"': f'name = {json.dumps(name.strip())}',
+        f'base_url = "{raw["site"]["base_url"]}"': f'base_url = "{base_url}"',
+        f'out = "{raw["site"]["out"]}"': f'out = "{pid}"',
+        f'worker_name = "{raw["waitlist"]["worker_name"]}"': f'worker_name = "{pid}-site"',
+        f'database_name = "{raw["waitlist"]["database_name"]}"': f'database_name = "{pid}-waitlist"',
+        f'stats_token_env = "{raw["waitlist"]["stats_token_env"]}"': f'stats_token_env = "{pid.upper().replace("-", "_")}_STATS_TOKEN"',
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new, 1)
+    text = text.replace(f'[brand]\nname = "{raw["brand"]["name"]}"', f"[brand]\nname = {json.dumps(name.strip())}", 1)
+    # A new project starts quiet: no submissions and no publishing until the owner turns them on.
+    text = text.replace('[channels.directory-submit]\nenabled = true', '[channels.directory-submit]\nenabled = false', 1)
+    text = re.sub(r'(kind = "directories-[a-z]+"\n)', r'\1enabled = false\n', text)
+    (folder / "project.toml").write_text(text, encoding="utf-8")
+    try:
+        home.engine()
+    except ConfigError as exc:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise ControlError("; ".join(exc.errors)) from None
+    guard.audit(home.state(), actor, "control.add-project", scope=pid, name=name.strip(), base_url=base_url)
+
+
+def build_now(home: Home, actor: str, pid: str) -> int:
+    """Refresh the data and rebuild the website now, in one process (`growth build`), under the engine lock."""
+    engine = home.engine()
+    guard.check_running(engine.state_dir)
+    _project(engine, pid)
+    log = engine.state_dir / "engine" / "manual-runs.log"
+    env = dict(os.environ)
+    if home.state_dir:
+        env["GROWTH_STATE_DIR"] = str(home.state_dir)
+    with open(log, "a") as out:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "growth", "--home", str(home.root), "build", pid],
+            stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            cwd=Path(__file__).resolve().parents[2], env=env, start_new_session=True,
+        )
+    guard.audit(engine.state_dir, actor, "control.build-now", scope=pid, pid=proc.pid)
+    return proc.pid

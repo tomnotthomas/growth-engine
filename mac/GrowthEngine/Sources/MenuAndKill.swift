@@ -9,7 +9,7 @@ struct KillSwitchButton: View {
 
     var body: some View {
         Button { killSheet = true } label: {
-            Label(store.killed ? "Halted" : "Kill switch", systemImage: store.killed ? "stop.circle.fill" : "stop.circle")
+            Label(store.killed ? "Stopped" : "Stop everything", systemImage: store.killed ? "stop.circle.fill" : "stop.circle")
         }
         .tint(Theme.killFill)
         .foregroundStyle(store.killed ? Theme.bad : .primary)
@@ -30,7 +30,7 @@ struct KillSwitchSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 12) {
                 Image(systemName: on ? "play.circle.fill" : "stop.circle.fill").font(.system(size: 30)).foregroundStyle(on ? Theme.good : Theme.bad)
-                Text(on ? "Resume the engine?" : "Halt the engine?").font(.title2.weight(.semibold))
+                Text(on ? "Resume the engine?" : "Stop everything?").font(.title2.weight(.semibold))
             }
             Text(on ? "Jobs start again on the next tick. Slots missed while halted follow each job's catch-up rule; nothing that already ran runs twice."
                     : "No job, deploy, engine update or outward action runs until you resume. Running work finishes its current step. The public site and the waitlist stay up.")
@@ -41,7 +41,7 @@ struct KillSwitchSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(on ? "Resume engine" : "Halt everything") {
+                Button(on ? "Resume engine" : "Stop everything") {
                     Task {
                         await store.setKill(!on, reason: reason)
                         dismiss()
@@ -86,7 +86,7 @@ struct MenuBarView: View {
                 }
             }
             if store.waitingCount > 0 {
-                Label("\(store.waitingCount) Reddit draft\(store.waitingCount == 1 ? "" : "s") waiting for you", systemImage: "text.bubble")
+                Label("\(store.waitingCount) Reddit repl\(store.waitingCount == 1 ? "y" : "ies") waiting for you to post", systemImage: "text.bubble")
                     .font(.callout)
             }
             Divider()
@@ -97,7 +97,7 @@ struct MenuBarView: View {
                 }
                 .keyboardShortcut("o")
                 Spacer()
-                Button(store.killed ? "Resume…" : "Kill switch…") { killSheet = true }
+                Button(store.killed ? "Resume…" : "Stop everything…") { killSheet = true }
                     .tint(Theme.killFill)
                     .disabled(!store.link.isOnline)
             }
@@ -155,7 +155,9 @@ struct ConnectionSettingsView: View {
             } else {
                 TextField("Port", value: $draft.localPort, format: .number.grouping(.never))
                 SecureField("Token", text: $draft.localToken)
-                Text("For `python3 -m growth serve --demo` (token: demo) or an engine running on this Mac.")
+                TextField("Or a command that prints the token", text: $draft.localTokenCommand,
+                          prompt: Text("cd ~/growth-engine && python3 -m growth app-token"))
+                Text("For `python3 -m growth serve --demo` (token: demo), or an engine running on this Mac (use the token command).")
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {

@@ -9,7 +9,7 @@ struct QueueView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                Text("The engine never posts these. Read, edit in Reddit, post from your own account, and say you build it.")
+                Text("Replies the engine wrote for Reddit threads where your product helps. It never posts them: copy one, open the thread, adjust it, and post it yourself, saying you made the product.")
                     .font(.callout).foregroundStyle(.secondary)
                 if let project = store.project {
                     if project.drafts.isEmpty {
@@ -72,56 +72,6 @@ struct DraftCard: View {
     }
 }
 
-// MARK: Jobs
-
-struct JobsView: View {
-    @Environment(EngineStore.self) private var store
-
-    var body: some View {
-        ScrollView {
-            if let project = store.project {
-                VStack(alignment: .leading, spacing: 16) {
-                    Panel {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(project.paused ? "\(project.name) is paused" : "\(project.name) is running").font(.headline)
-                                Text(project.paused ? "No job of this project runs until you resume it. Missed slots follow each job's catch-up rule."
-                                                    : "Pausing stops every job of this project; the kill switch stops the whole engine.")
-                                    .font(.callout).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button(project.paused ? "Resume project" : "Pause project") {
-                                Task { await store.setPaused(project.id, !project.paused) }
-                            }
-                            .disabled(store.working.contains("pause:\(project.id)"))
-                        }
-                    }
-                    JobTable(scope: project.id, jobs: project.jobs)
-                }
-                .padding(24)
-                .frame(maxWidth: 1180, alignment: .leading)
-            }
-        }
-    }
-}
-
-struct JobTable: View {
-    @Environment(EngineStore.self) private var store
-    var scope: String
-    var jobs: [Job]
-
-    var body: some View {
-        Panel(padding: 0) {
-            VStack(spacing: 0) {
-                ForEach(jobs) { job in
-                    JobRow(scope: scope, job: job)
-                    if job.id != jobs.last?.id { Divider().padding(.leading, 16) }
-                }
-            }
-        }
-    }
-}
-
 struct JobRow: View {
     @Environment(EngineStore.self) private var store
     var scope: String
@@ -161,31 +111,6 @@ struct JobRow: View {
 
 // MARK: Channels
 
-struct ChannelsView: View {
-    @Environment(EngineStore.self) private var store
-
-    var body: some View {
-        ScrollView {
-            if let project = store.project {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("A channel's level is a platform fact; a project can only switch a channel on within it. Rate limits count outward actions; the never-automate checks run before every one.")
-                        .font(.callout).foregroundStyle(.secondary)
-                    Panel(padding: 0) {
-                        VStack(spacing: 0) {
-                            ForEach(project.channels) { channel in
-                                ChannelRow(project: project.id, channel: channel)
-                                if channel.id != project.channels.last?.id { Divider().padding(.leading, 16) }
-                            }
-                        }
-                    }
-                }
-                .padding(24)
-                .frame(maxWidth: 1180, alignment: .leading)
-            }
-        }
-    }
-}
-
 struct ChannelRow: View {
     @Environment(EngineStore.self) private var store
     var project: String
@@ -193,44 +118,50 @@ struct ChannelRow: View {
     @State private var limit = ""
 
     var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text(channel.label).font(.callout.weight(.semibold))
-                    Text(channel.level).font(.caption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Theme.hairline, in: Capsule())
-                }
-                Text(channel.why).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Text("\(channel.usedLastDay) outward actions in the last 24 hours").font(.caption).foregroundStyle(.secondary).figures()
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(channelName(channel)).font(.body.weight(.medium))
+                Text(levelWords(channel.level)).font(.caption2.weight(.semibold)).padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Theme.hairline, in: Capsule())
+                Spacer()
+                Toggle("Pause", isOn: Binding(get: { channel.paused }, set: { on in Task { await store.setChannel(project, channel.id, paused: on) } }))
+                    .toggleStyle(.switch)
             }
-            Spacer(minLength: 20)
-            TextField("no limit", text: $limit)
-                .frame(width: 90).figures()
-                .onSubmit { Task { await store.setChannel(project, channel.id, rateLimit: limit) } }
-                .help("Outward actions per window, e.g. 20/24h. Press Return to save; empty removes the limit.")
-            Toggle("Paused", isOn: Binding(get: { channel.paused }, set: { on in Task { await store.setChannel(project, channel.id, paused: on) } }))
-                .toggleStyle(.switch)
+            Text(channel.why).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Text("At most").font(.callout)
+                TextField("", text: $limit, prompt: Text("no limit"))
+                    .labelsHidden().frame(width: 90).figures()
+                    .onSubmit { Task { await store.setChannel(project, channel.id, rateLimit: limit) } }
+                Text("(e.g. 20/24h, Return saves) · \(channel.usedLastDay) done in the last 24 hours")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .disabled(store.working.contains("channel:\(project)/\(channel.id)") || !store.link.isOnline)
-        .padding(.horizontal, 16).padding(.vertical, 12)
+        .padding(.vertical, 4)
         .onAppear { limit = channel.rateLimit }
         .onChange(of: channel.rateLimit) { limit = channel.rateLimit }
     }
 }
 
-// MARK: Activity
+func channelName(_ channel: Channel) -> String {
+    switch channel.id {
+    case "website": return "Your website"
+    case "directory-submit": return "Directory submissions"
+    case "indexnow": return "Notices to search engines"
+    case "digest": return "Weekly report"
+    case "reddit": return "Reddit replies"
+    case "analytics": return "Reading your visitor numbers"
+    case "waitlist-email": return "Waitlist emails"
+    default: return channel.label
+    }
+}
 
-struct ActivityView: View {
-    var dashboard: Dashboard
-
-    var body: some View {
-        Table(dashboard.activity) {
-            TableColumn("When") { a in Text(Fmt.clock(a.at)).figures().foregroundStyle(.secondary) }.width(min: 120, ideal: 150)
-            TableColumn("Job") { a in Text("\(a.scope) / \(Fmt.jobName(a.job))") }.width(min: 160, ideal: 200)
-            TableColumn("Result") { a in
-                HStack(spacing: 6) { StatusDot(color: Theme.status(a.status)); Text(a.status) }
-            }.width(min: 90, ideal: 100)
-            TableColumn("Summary") { a in Text(a.summary).foregroundStyle(.secondary).help(a.summary) }
-        }
+func levelWords(_ level: String) -> String {
+    switch level {
+    case "auto": return "runs on its own"
+    case "human-queue": return "you post"
+    case "needs-approval": return "needs platform approval"
+    default: return "never"
     }
 }

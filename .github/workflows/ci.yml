@@ -75,8 +75,21 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Build the Mac control app
         run: mac/GrowthEngine/build.sh
+      - name: The app drives every control against a throwaway engine home (loopback only)
+        env:
+          GROWTH_CONFIG_DIR: ${{ runner.temp }}/config
+          GROWTH_KEY_BACKEND: file
+        run: |
+          cp -R examples/home "$RUNNER_TEMP/home"
+          python -m growth --home "$RUNNER_TEMP/home" serve --port 8799 > "$RUNNER_TEMP/serve.log" 2>&1 &
+          sleep 3
+          "mac/build/Growth Engine.app/Contents/MacOS/GrowthEngine" --selftest --port 8799 \
+            --token-command "cd '$GITHUB_WORKSPACE' && python -m growth app-token"
 
   secrets:
     runs-on: ubuntu-latest

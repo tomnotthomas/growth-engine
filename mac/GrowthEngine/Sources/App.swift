@@ -43,7 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var store: EngineStore?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if let folder = MainActor.assumeIsolated({ Snapshot.folder }) {
+        if MainActor.assumeIsolated({ SelfTest.requested }) {
+            Task { @MainActor in await SelfTest.run() }
+        } else if let folder = MainActor.assumeIsolated({ Snapshot.folder }) {
             Task { @MainActor in await Snapshot.run(into: folder) }
         }
     }

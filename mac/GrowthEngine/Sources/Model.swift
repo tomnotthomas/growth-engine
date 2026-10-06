@@ -78,6 +78,8 @@ struct Upcoming: Decodable, Identifiable {
     var scope: String
     var job: String
     var kind: String
+    var name: String
+    var does: String
     var id: String { "\(scope)/\(job)@\(at)" }
 }
 
@@ -87,6 +89,7 @@ struct Activity: Decodable, Identifiable {
     var job: String
     var status: String
     var summary: String
+    var name: String
     var id: String { "\(scope)/\(job)@\(at ?? "")/\(status)" }
 }
 
@@ -108,6 +111,38 @@ struct Project: Decodable, Identifiable {
     var blocks: [Block]
     var deploy: DeployState
     var keywords: [Keyword]
+    var setup: [SetupStep]
+    var nextStep: SetupStep?
+    var pages: [PageText]
+    var legal: [String: String]
+    var connections: [Connection]
+
+    var setupDone: Int { setup.filter(\.done).count }
+}
+
+struct SetupStep: Decodable, Identifiable, Equatable {
+    var id: String
+    var title: String
+    var why: String
+    var done: Bool
+    var go: String
+}
+
+struct PageText: Decodable, Identifiable, Equatable {
+    var page: String
+    var lang: String
+    var path: String
+    var title: String
+    var description: String
+    var headline: String
+    var sub: String
+    var id: String { "\(page)/\(lang)" }
+}
+
+struct Connection: Decodable, Identifiable {
+    var name: String
+    var set: Bool
+    var id: String { name }
 }
 
 struct Goal: Decodable {
@@ -164,6 +199,10 @@ struct CountryCount: Decodable, Identifiable {
 struct Job: Decodable, Identifiable {
     var id: String
     var kind: String
+    var name: String
+    var does: String
+    var produces: String
+    var when: String
     var description: String
     var schedule: String
     var enabled: Bool
