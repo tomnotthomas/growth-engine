@@ -1,29 +1,68 @@
 # Deploying a project's site and waitlist
 
-Nothing is public until someone runs the deploy command, and that command asks for the project id as
-confirmation. Until a project sets `[site] indexable = true` (which needs the decided domain and the
-legal-notice and privacy pages), every page carries `noindex` and `robots.txt` disallows everything,
-even when deployed.
+Nothing is public before the owner's launch go. Until then every deploy stops at a private preview,
+and until a project sets `[site] indexable = true` (which needs the decided domain and the legal-notice
+and privacy pages) every page also carries `noindex` and `robots.txt` disallows everything.
 
-## One command (Cloudflare, free tier)
+## The pipeline
 
-```sh
-GROWTH_HOME=~/growth-home ~/growth-engine/deploy/cloudflare.sh <project>
+```
+push to a PR ──► CI: lint · unit tests (3.11, 3.12) · example build + link check · never-automate
+                     · Mac app build · gitleaks ──► ci-ok (the required check) ──► merge to main
+main on GitHub ──► GEEKOM growth-update timer (every 15 min): newest main commit with all checks green
+                     and a GitHub-verified signature ──► fast-forward under the engine lock ──►
+                     self-check (growth check + unit tests) ──► restart, or roll back and skip it
+built site changed (content or engine) ──► deploy job (every 15 min, per project):
+                     build ──► link check ──► D1 + schema ──► wrangler versions upload (private preview)
+                     ──► smoke checks on the preview ──► [deploy] launched = true? ──► promote to 100%
+                     ──► smoke checks on the domain ──► on failure: back to the last good version
 ```
 
-It builds the site, creates the D1 database on the first run (and records its id in the project's
-`[waitlist] d1_database_id`), applies `schema.sql`, checks the Worker secrets, and runs
-`wrangler deploy` from `dist/<out>/`. One-time prerequisites, done by the owner:
+Every step of a deploy goes through the same guards as any outward action: the kill switch, the
+never-automate checks, the `website` channel's rate limit and pause switch, and the audit log. Both
+the updates and the deploys appear in the weekly digest and in the Mac app.
 
-1. A Cloudflare account and `npx wrangler login` on the deploying machine.
-2. The domain on Cloudflare (or a CNAME), attached to the Worker under Workers, Domains.
-3. Worker secrets, set from `dist/<out>/` with `npx wrangler secret put <NAME>`:
-   - `EMAIL_API_KEY`: the mail provider's API key (Brevo or Resend; the sender domain must be verified there),
-   - `STATS_TOKEN`: a long random string; also put it in the engine's env file under the project's `stats_token_env`,
+## Turning it on for a project
+
+In the project's `project.toml` (in the private home):
+
+```toml
+[deploy]
+launched = false          # the launch go; flip it in the Mac app (Project settings, Launch)
+
+[jobs.deploy]
+kind = "deploy"
+schedule = "every 15m"    # deploys only when the built output changed
+```
+
+By hand: `growth deploy <project>` (or `deploy/cloudflare.sh <project>`), same rules.
+
+## One-time setup (the owner)
+
+1. A free Cloudflare account.
+2. An **API token** (My Profile, API Tokens, Create Token, Custom token) with only:
+   - Account, **Workers Scripts**, Edit
+   - Account, **D1**, Edit
+   - Account resources: include only your account. No zone or user permissions.
+3. On the GEEKOM, into the encrypted store (never a file in the home or the repo):
+   ```sh
+   cd ~/growth-engine
+   python3 -m growth secret set CLOUDFLARE_API_TOKEN
+   python3 -m growth secret set CLOUDFLARE_ACCOUNT_ID   # from the dashboard's account home
+   ```
+4. Before the launch go: the domain on Cloudflare attached to the Worker (Workers, your Worker,
+   Domains), and the Worker secrets, set once from `dist/<out>/` with `npx wrangler secret put <NAME>`:
+   - `EMAIL_API_KEY`: the mail provider's key (Brevo or Resend; the sender domain verified there),
+   - `STATS_TOKEN`: a long random string; also `growth secret set <PROJECT>_STATS_TOKEN` (the name in
+     `[waitlist] stats_token_env`) so the dashboard and digest can read the numbers,
    - `HASH_SALT`: a long random string for hashing IPs in the rate limit.
-4. In the project: `[waitlist] email_provider` set to `brevo` or `resend` (the default `log` only
-   prints mails, for local development, and the deploy command refuses it), `email_from` with an
-   address on the verified domain, and `[goal] start` set to the launch date.
+5. In the project: `[waitlist] email_provider` set to `brevo` or `resend` (the default `log` only
+   prints mails and blocks production), `email_from` on the verified domain, `[goal] start`.
+
+The deploy job creates the D1 database on its first run and keeps its id in
+`state/projects/<id>/deploy.json`. Previews live on unlisted `*.workers.dev` preview URLs. Anyone with the
+exact URL can open one, and they share the production D1 database, so the smoke checks only read
+(`/api/waitlist/count`). Before `[site] indexable` the pages carry `noindex` there too.
 
 Until `EMAIL_API_KEY` exists, the Worker answers sign-ups with "opens soon" and stores nothing.
 
@@ -41,8 +80,9 @@ So the double opt-in needs either a paid mail plan at launch or fewer mails per 
 `moved_up_mail = false` saves the referral notifications, but the confirmation and welcome mails are
 the minimum. That is the owner's call; nothing is bought by the engine.
 
-## Static only (GitHub Pages or Cloudflare Pages)
+## Why Workers static assets and not Pages
 
-`dist/<out>/public/` is a plain static site and can be served by GitHub Pages or Cloudflare Pages as
-it is. Without the Worker the waitlist forms have nowhere to post, so this suits only sites without
-`[waitlist]`.
+The site and the waitlist ship as one Worker with static assets: the forms post to `/api/*` on the
+same origin, one upload versions both together, and Cloudflare's version API gives the preview,
+promote and rollback steps directly. It is on the same free tier as Pages. A site without
+`[waitlist]` is plain static output in `dist/<out>/public/` and can also go to Pages or GitHub Pages.

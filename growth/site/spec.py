@@ -114,6 +114,8 @@ def load_pages(project: "Project") -> dict[str, PageSpec]:
 
 
 def load_keywords(project: "Project") -> list[dict[str, Any]]:
+    if "keywords" in project.raw.get("control", {}):  # set from the control app; replaces keywords.toml
+        return list(project.raw["control"]["keywords"])
     path = project.root / project.site.get("keywords", "keywords.toml")
     return list(read_toml(path).get("cluster", [])) if path.is_file() else []
 

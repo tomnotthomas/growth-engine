@@ -20,6 +20,16 @@ cooldown_after_limit = "5h"
 language = "English"
 webhook_env = "GROWTH_DIGEST_WEBHOOK"
 
+[guard]
+# Hosts outbound requests may reach besides the ones the config already names (data sources, the
+# project's domain, analytics, IndexNow, verified directory sites, GitHub for updates).
+outbound_allow = ["ntfy.sh"]
+
+[guard.rate_limits]
+# Outward actions per channel and window; a project can set its own in the control app.
+directory-submit = "20/24h"
+website = "40/24h"
+
 [jobs.weekly-digest]
 kind = "digest"
 schedule = "weekly mon 05:30"

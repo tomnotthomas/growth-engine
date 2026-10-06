@@ -1,0 +1,12 @@
+# Every 15 minutes, and once after boot. A GEEKOM that slept simply updates on the next run.
+[Unit]
+Description=growth-engine self-update
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

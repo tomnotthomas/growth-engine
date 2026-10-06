@@ -19,6 +19,11 @@ growth/
   themes/base/   the base stylesheet every generated page uses; projects add tokens.css
   assets/        waitlist.js (forms, live counter, invite page)
   waitlist/      the Cloudflare Worker (waitlist.js), D1 schema, bundle writer
+  guard.py       kill switch, hash-chained audit log, per-channel rate limits, outbound allow-list
+  secrets.py     the encrypted secrets store (DPAPI-wrapped key on WSL)
+  update.py      self-update to the newest green, signed main commit, with self-check and rollback
+  control/       the control API for the Mac app (127.0.0.1 only), its snapshot, operations, demo
+mac/             the Mac control app (SwiftUI), built with mac/GrowthEngine/build.sh
 ```
 
 ## The run ledger: why nothing runs twice
@@ -52,6 +57,7 @@ are `indexnow:<path>:<content hash>`; the digest webhook key is the digest's dat
 | `directories-sync` | project | no | yes | Imports the launch-directory list into `state/projects/<id>/directories.json` and scores each entry, keeping statuses and drafts. |
 | `directories-draft` | project | required | yes | Drafts listing texts for the best-scoring undrafted sites from the project's fact sheet (one AI run per batch); refuses text with numbers the fact sheet lacks. |
 | `directories-submit` | project | no | no | From launch day on: submits once to each verified API or plain-form site through the side-effect ledger; marks the rest skipped. |
+| `deploy` | project | no | yes (each upload and promote is a side effect, once per build) | When the built output changed: builds, link-checks, uploads a private preview version to Cloudflare, smoke-checks it, and only with `[deploy] launched = true` promotes it to production, smoke-checks the domain and rolls back to the last good version on failure. See docs/deploy.md. |
 | `digest` | engine | optional | no | Collects facts, has Claude write the narrative (without AI budget it goes out on time with the facts alone), checks its numbers, writes `state/engine/digests/<date>.md` and `.html`, and optionally POSTs to a webhook. |
 
 ## The site generator

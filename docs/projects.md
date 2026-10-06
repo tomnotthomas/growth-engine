@@ -28,11 +28,13 @@ projects/<id>/
 | `[channels.<id>]` | `enabled`, `accounts` (at most one), `approval = { granted, evidence }` for needs-approval channels |
 | `[data.<id>]` | `kind` (`http-json` or `file-json`), `url` or `path`, `id_field`, `keep_fields`, `list_key`, `timeout`, `retries`, `max_age`, `allow_empty` |
 | `[collections.<id>]` | `curated`, `source`, `hub`, `match_live`, `match_curated`, `require_live`, `trust_live_list`, `min_searches`, `max_wave` |
-| `[waitlist]` | `status_page`, `host_status_page`, `worker_name`, `database_name`, `d1_database_id`, `email_provider` (`brevo`, `resend` or `log`), `email_from`, `move_up_per_referral`, `max_credited_referrals`, `moved_up_mail`, `counter_min`, `signups_per_ip_hour` (default 40), `stats_token_env` |
+| `[waitlist]` | `status_page`, `host_status_page`, `worker_name`, `database_name`, `d1_database_id`, `email_provider` (`brevo`, `resend` or `log`), `email_from`, `move_up_per_referral`, `max_credited_referrals`, `moved_up_mail`, `counter_min`, `signups_per_ip_hour` (default 40), `stats_token_env` (the name of the stats token in the secrets store) |
 | `[goal]` | `name`, `target`, `days`, `start` (the launch date), `zone` (country codes that count toward the goal; empty counts all) |
-| `[analytics]` | `provider` (`none` or `posthog`), `capture_host` and `project_api_key` (the public write key; events go through the Worker's `/api/e` relay, cookieless, no IP and no person profile), `host`, `project_id` and `api_key_env` (the personal read key, from the environment, for the digest's traffic and funnel; the goal numbers come from the waitlist ledger, and from PostHog only as a labelled estimate when the ledger is not reachable) |
+| `[analytics]` | `provider` (`none` or `posthog`), `capture_host` and `project_api_key` (the public write key; events go through the Worker's `/api/e` relay, cookieless, no IP and no person profile), `host`, `project_id` and `api_key_env` (the name of the personal read key in the secrets store, for the digest's traffic and funnel; the goal numbers come from the waitlist ledger, and from PostHog only as a labelled estimate when the ledger is not reachable) |
 | `[directories]` | `source` (URL or a file in the project), `audience_terms`, `regions`, `exclude_terms`, `fact_sheet`, `voice`, `draft_batch`, `submit` (verified sites), `launch_date` (default: `[goal] start`) |
 | `[[site]]` in the `submit` file | `id` (catalogue id: host without `www.` plus path), `method` (`api` or `form`), `endpoint` (https, on the same site), `fields`, `captcha = false`, `account = false`, `terms_url`, `terms_checked` (YYYY-MM-DD), `terms_allow_automation` (default false; only the boolean `true` allows automatic submission) |
+| `[deploy]` | `launched` (default `false`: deploys stop at a private preview; `true` is the owner's launch go and needs `[site] domain_decided`). Set it from the Mac app. |
+| `[guard]` | `rate_limits` (per channel, e.g. `{ directory-submit = "10/24h" }`; overrides the engine's) |
 | `[jobs.<id>]` | `kind`, `schedule`, `enabled`, `catchup` (`latest`, `all` or `skip`), `max_late`, `max_attempts`, plus kind parameters (`key` for indexnow; the build publishes it as `/<key>.txt`) |
 
 ## Curated collection items
@@ -63,3 +65,10 @@ page links them in its footer in its own language.
 `languages` lists every language the project has copy for; `live_languages` lists the ones built
 now. A language that is ready but not live gets no pages, no sitemap entries and no hreflang links,
 so a later market wave is switched on by adding it to `live_languages` and rebuilding.
+
+## Settings changed from the Mac app
+
+Changes made in the app (targets, budgets, rate limits, paused jobs and channels, brand, domain,
+keywords, the launch switch) are kept on the engine host in `state/engine/control.json`, layered over
+`engine.toml` and `project.toml`, and validated exactly like them. To make one permanent, copy it into
+the TOML file and remove it from `control.json`.

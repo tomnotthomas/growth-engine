@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import shutil
 import sys
 import tempfile
@@ -10,7 +11,9 @@ import textwrap
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
+from growth import secrets
 from growth.config import Engine, load_engine
 from growth.store import Store
 
@@ -53,6 +56,12 @@ class HomeTestCase(unittest.TestCase):
         self.home = self.tmp / "home"
         shutil.copytree(EXAMPLE_HOME, self.home, ignore=shutil.ignore_patterns("state", "dist"))
         self.project_dir = self.home / "projects" / "example"
+        # Secrets come from a throwaway store, never the machine's real one.
+        env = mock.patch.dict(os.environ, {"GROWTH_CONFIG_DIR": str(self.tmp / "config"), "GROWTH_KEY_BACKEND": "file"})
+        env.start()
+        self.addCleanup(env.stop)
+        secrets.forget_cache()
+        self.addCleanup(secrets.forget_cache)
         fake = self.tmp / "fake_claude.py"
         fake.write_text(FAKE_CLAUDE)
         self.fake_claude = [sys.executable, str(fake)]

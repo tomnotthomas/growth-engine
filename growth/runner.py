@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator
 
+from . import guard
 from .ai import AIUnavailable, ClaudeRunner
 from .budget import Budget
 from .config import ENGINE_SCOPE, Engine, JobSpec, Project
@@ -83,13 +84,26 @@ class JobContext:
         return ClaudeRunner(self.engine.ai, self.store, self.budget, self.scope, self.job.id, str(workdir), now=self.now)
 
     def check(self, action: Action) -> None:
-        """Raise PolicyViolation (and log it as blocked) if the action crosses a hard line."""
+        """Raise PolicyViolation (and log it as blocked) if the action crosses a hard line or a guard.
+
+        In order: the kill switch, the never-automate checks, a paused channel, the channel's rate limit.
+        """
+        guard.check_running(self.engine.state_dir)
         rules = self.project.rules if self.project else _no_rules()
         try:
             check_action(action, rules, self.store.text_communities)
+            channel = self.project.channels.get(action.channel, {}) if self.project else {}
+            if channel.get("paused"):
+                raise PolicyViolation("channel-paused", f"{action.channel} is paused from the control app")
+            guard.check_rate(self.store, self.scope, action.channel, self.rate_limit(action.channel), self.now)
         except PolicyViolation as exc:
             self.store.record_block(self.scope, self.job.id, exc.rule, exc.message)
+            guard.audit(self.engine.state_dir, "engine", "blocked", scope=self.scope, job=self.job.id, rule=exc.rule, message=exc.message)
             raise
+
+    def rate_limit(self, channel: str) -> str | None:
+        own = self.project.raw.get("guard", {}).get("rate_limits", {}) if self.project else {}
+        return own.get(channel) or self.engine.guard.get("rate_limits", {}).get(channel)
 
     def act(self, action: Action, key: str, do: "callable", *, retry_failed: bool = False) -> str:
         """Do an outward action at most once per key, after the policy check.
@@ -106,12 +120,16 @@ class JobContext:
             return "unknown"
         if state == "failed":
             return "failed-before"
+        where = {"scope": self.scope, "job": self.job.id, "channel": action.channel, "kind": action.kind, "key": key}
+        guard.audit(self.engine.state_dir, "engine", "action.start", **where)
         try:
             detail = do()
         except Exception as exc:
             self.store.effect_end(self.scope, key, "failed", str(exc))
+            guard.audit(self.engine.state_dir, "engine", "action.failed", **where, error=str(exc)[:300])
             raise
         self.store.effect_end(self.scope, key, "done", str(detail or ""))
+        guard.audit(self.engine.state_dir, "engine", "action.done", **where, result=str(detail or "")[:300])
         if action.text and action.community:
             from .policy import fingerprint
 
@@ -132,8 +150,11 @@ class TickReport:
     missed: list[str] = field(default_factory=list)
     deferred: list[str] = field(default_factory=list)
     interrupted: list[str] = field(default_factory=list)
+    halted: str = ""
 
     def lines(self) -> list[str]:
+        if self.halted:
+            return [f"halted: {self.halted}"]
         out = [f"ran {r}" for r in self.ran]
         out += [f"failed {f}" for f in self.failed]
         out += [f"missed {m}" for m in self.missed]
@@ -146,7 +167,12 @@ def all_jobs(engine: Engine) -> list[tuple[Project | None, JobSpec]]:
     jobs: list[tuple[Project | None, JobSpec]] = [(None, j) for j in engine.jobs.values()]
     for project in engine.projects.values():
         jobs += [(project, j) for j in project.jobs.values()]
-    return [(p, j) for p, j in jobs if j.enabled]
+    return [(p, j) for p, j in jobs if j.enabled and not (p and p.paused) and not _channel_paused(p, j)]
+
+
+def _channel_paused(project: Project | None, job: JobSpec) -> bool:
+    channel = JOB_KINDS[job.kind].channel
+    return bool(project and channel and project.channels.get(channel, {}).get("paused"))
 
 
 def tick(engine: Engine, *, now: datetime | None = None, store: Store | None = None) -> TickReport:
@@ -158,6 +184,14 @@ def tick(engine: Engine, *, now: datetime | None = None, store: Store | None = N
         try:
             for run in store.mark_stale_running():
                 report.interrupted.append(f"{run.scope}/{run.job}@{run.slot}")
+            store.put("last_tick", iso(now))
+            try:
+                guard.check_running(engine.state_dir)
+            except guard.Halted as exc:
+                # Nothing runs and no slot is marked missed while halted; the catch-up policy decides
+                # what runs once the switch is off, exactly as after the PC was off.
+                report.halted = str(exc)
+                return report
             budget = Budget(engine.ai, store, engine.tz)
             for project, job in all_jobs(engine):
                 _tick_job(engine, store, budget, project, job, now, report)
@@ -237,6 +271,7 @@ def run_now(engine: Engine, scope: str, job_id: str, *, now: datetime | None = N
     job = jobs[job_id]
     if not job.enabled:
         raise KeyError(f"{scope}/{job_id} is switched off (enabled = false)")
+    guard.check_running(engine.state_dir)
     slot = now.replace(microsecond=0)
     with engine_lock(engine.state_dir):
         store = Store(engine.state_dir / "engine.db")

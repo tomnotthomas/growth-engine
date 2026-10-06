@@ -86,6 +86,15 @@ JOB_KINDS: dict[str, JobKind] = {
             description="From launch day: submit to verified API or plain-form directories once each; skip and report the rest.",
         ),
         JobKind(
+            "deploy",
+            "growth.jobs.deploy:run",
+            "project",
+            ai=None,
+            idempotent=True,
+            channel="website",
+            description="When the built site changed: preview on Cloudflare, check it, and only after the launch go promote to production (rolls back if the live checks fail).",
+        ),
+        JobKind(
             "digest",
             "growth.jobs.digest:run",
             "engine",

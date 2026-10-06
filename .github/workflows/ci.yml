@@ -8,7 +8,27 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Python lint (ruff)
+        run: |
+          python -m pip install --quiet ruff==0.13.3
+          ruff check .
+      - name: Shell scripts (shellcheck)
+        run: shellcheck deploy/*.sh mac/GrowthEngine/build.sh
+      - name: JavaScript syntax
+        run: for f in growth/assets/*.js growth/waitlist/*.js; do node --check "$f"; done
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -22,14 +42,41 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Unit tests (engine, scheduler, generator, policy, digest, worker)
+      - name: Unit tests (engine, scheduler, generator, policy, digest, guards, control API, update, deploy, worker)
         run: python -m unittest discover -s tests -t . -v
+
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Example project validates and builds
         env:
           GROWTH_STATE_DIR: ${{ runner.temp }}/state
         run: |
           python -m growth --home examples/home check
           python -m growth --home examples/home build example
+      - name: Every internal link, script, stylesheet and image exists
+        run: python -m growth.site.links examples/home/dist/example/public
+
+  never-automate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Never-automate rules, channel levels (and their docs table), guards, public-repo hygiene
+        run: python -m unittest tests.test_policy tests.test_guard tests.test_repo -v
+
+  mac-app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the Mac control app
+        run: mac/GrowthEngine/build.sh
 
   secrets:
     runs-on: ubuntu-latest
@@ -41,3 +88,13 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The one check to require in branch protection: green only when every job above is green.
+  ci-ok:
+    if: always()
+    needs: [lint, test, site, never-automate, mac-app, secrets]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All CI jobs passed
+        run: |
+          echo '${{ toJSON(needs) }}' | python3 -c "import json,sys; bad=[k for k,v in json.load(sys.stdin).items() if v['result']!='success']; print('failed:', bad) if bad else print('all green'); sys.exit(1 if bad else 0)"

@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from . import channels as ch
 from .policy import PolicyViolation, ProjectRules, check_url
 from .schedule import Schedule, parse_schedule
-from .util import parse_duration, read_toml
+from .util import parse_duration, read_json, read_toml
 
 ENGINE_SCOPE = "engine"
 INDEXNOW_KEY = re.compile(r"[A-Za-z0-9-]{8,128}")
@@ -83,6 +83,20 @@ class Project:
     def channel_enabled(self, channel_id: str) -> bool:
         return bool(self.channels.get(channel_id, {}).get("enabled", False))
 
+    @property
+    def paused(self) -> bool:
+        """Paused from the control app: no job of this project runs until it is resumed."""
+        return bool(self.raw.get("paused", False))
+
+    @property
+    def deploy(self) -> dict[str, Any]:
+        return dict(self.raw.get("deploy", {}))
+
+    @property
+    def launched(self) -> bool:
+        """The owner's launch go: only then does a deploy reach production. False by default."""
+        return self.deploy.get("launched") is True
+
 
 @dataclass
 class Engine:
@@ -94,6 +108,8 @@ class Engine:
     jobs: dict[str, JobSpec]
     digest: dict[str, Any]
     projects: dict[str, Project]
+    guard: dict[str, Any] = field(default_factory=dict)
+    deploy: dict[str, Any] = field(default_factory=dict)
 
 
 def default_home() -> Path:
@@ -112,9 +128,10 @@ def load_engine(root: Path, *, state_dir: Path | None = None, dist_dir: Path | N
     if not (root / "engine.toml").is_file():
         raise ConfigError([f"{root}/engine.toml not found (set GROWTH_HOME or pass --home; see docs/setup.md)"])
     raw = read_toml(root / "engine.toml")
+    state = state_dir or resolve_state_dir(root, raw)
+    control = read_control(state)
+    raw = deep_merge(raw, control.get("engine", {}))
     tz = _zone(raw.get("timezone", "UTC"), "engine.toml timezone", errors)
-    env_state = os.environ.get("GROWTH_STATE_DIR")
-    state = state_dir or root / Path(env_state or raw.get("state_dir", "state")).expanduser()
     dist = dist_dir or root / raw.get("dist_dir", "dist")
     ai = _ai(raw.get("ai", {}), errors)
     from .jobs import JOB_KINDS
@@ -129,16 +146,18 @@ def load_engine(root: Path, *, state_dir: Path | None = None, dist_dir: Path | N
     projects_dir = root / raw.get("projects_dir", "projects")
     for folder in sorted(p for p in projects_dir.iterdir() if (p / "project.toml").is_file()) if projects_dir.is_dir() else []:
         try:
-            project = load_project(folder)
+            project = load_project(folder, control.get("projects", {}).get(folder.name, {}))
         except ConfigError as exc:
             errors.extend(exc.errors)
             continue
         if project is not None:
             projects[project.id] = project
 
+    guard = dict(raw.get("guard", {}))
+    _check_guard(guard, "engine.toml [guard]", errors)
     if errors:
         raise ConfigError(errors)
-    return Engine(
+    engine = Engine(
         root=root,
         state_dir=state,
         dist_dir=dist,
@@ -147,14 +166,66 @@ def load_engine(root: Path, *, state_dir: Path | None = None, dist_dir: Path | N
         jobs=jobs,
         digest=raw.get("digest", {}),
         projects=projects,
+        guard=guard,
+        deploy=dict(raw.get("deploy", {})),
     )
+    from .guard import allow_hosts, derive_hosts
+
+    allow_hosts(derive_hosts(engine))
+    return engine
 
 
-def load_project(folder: Path) -> Project | None:
-    """Load one project folder; None when it is switched off (enabled = false)."""
+def resolve_state_dir(root: Path, raw: dict[str, Any] | None = None) -> Path:
+    """The state folder, even when the rest of the configuration does not load (the kill switch needs it)."""
+    root = root.expanduser().resolve()
+    if raw is None:
+        try:
+            raw = read_toml(root / "engine.toml")
+        except (OSError, ValueError):
+            raw = {}
+    return root / Path(os.environ.get("GROWTH_STATE_DIR") or raw.get("state_dir", "state")).expanduser()
+
+
+def read_control(state_dir: Path) -> dict[str, Any]:
+    """Settings changed from the control app (state/engine/control.json), layered over the TOML files."""
+    data = read_json(state_dir / "engine" / "control.json", {}) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def deep_merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for key, value in over.items():
+        out[key] = deep_merge(out[key], value) if isinstance(value, dict) and isinstance(out.get(key), dict) else value
+    return out
+
+
+def _check_guard(guard: dict[str, Any], where: str, errors: list[str]) -> None:
+    from .guard import parse_rate
+
+    for cid, limit in dict(guard.get("rate_limits", {})).items():
+        if cid not in ch.CHANNELS:
+            errors.append(f"{where} rate_limits.{cid}: unknown channel")
+        try:
+            parse_rate(str(limit))
+        except ValueError as exc:
+            errors.append(f"{where} rate_limits.{cid}: {exc}")
+    hosts = guard.get("outbound_allow", [])
+    if not isinstance(hosts, list) or not all(isinstance(h, str) and re.fullmatch(r"(\*\.)?[a-z0-9.-]+", h) for h in hosts):
+        errors.append(f"{where} outbound_allow must be a list of host names (e.g. \"ntfy.sh\", \"*.example.com\")")
+
+
+def load_project(folder: Path, control: dict[str, Any] | None = None) -> Project | None:
+    """Load one project folder; None when it is switched off (enabled = false).
+
+    `control` holds the settings changed from the control app; they override project.toml and go
+    through exactly the same validation.
+    """
     errors: list[str] = []
     where = f"projects/{folder.name}/project.toml"
     raw = read_toml(folder / "project.toml")
+    if control:
+        raw = deep_merge(raw, control)
+        raw["control"] = control
     if not raw.get("enabled", True):
         return None
     pid = raw.get("id", "")
@@ -196,6 +267,12 @@ def load_project(folder: Path) -> Project | None:
                 errors.append(f"{where}: data.{sid}: url must be https")
 
     jobs = _jobs(raw.get("jobs", {}), where, errors)
+    deploy = raw.get("deploy", {})
+    if not isinstance(deploy.get("launched", False), bool):
+        errors.append(f"{where}: [deploy] launched must be true or false")
+    elif deploy.get("launched") and not site.get("domain_decided"):
+        errors.append(f"{where}: [deploy] launched needs [site] domain_decided = true (production is served on the decided domain)")
+    _check_guard(dict(raw.get("guard", {})), f"{where} [guard]", errors)
     project = Project(
         id=str(pid),
         root=folder,
