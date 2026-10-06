@@ -47,18 +47,42 @@ AI for its narrative: without budget it goes out on time with the fact tables al
 ~/growth-engine/deploy/install-wsl.sh ~/growth-home
 ```
 
-This installs `growth-engine.timer` as a user unit (every 5 minutes, `Persistent=true`) and enables
-lingering, so it runs without a login session. It writes `~/.config/growth-engine/env` with
-`GROWTH_HOME`. Secrets go in that file too:
+This installs three user units and enables lingering, so they run without a login session:
 
-| Variable | Used by |
+| Unit | What it does |
 |---|---|
-| `GROWTH_DIGEST_WEBHOOK` | optional: the digest is also POSTed there (e.g. an ntfy.sh topic URL) |
-| `<PROJECT>_STATS_TOKEN` (name set in the project's `[waitlist] stats_token_env`) | the digest's goal tracker reads the Worker's stats |
-| PostHog personal API key (name set in `[analytics] api_key_env`) | traffic in the digest |
+| `growth-engine.timer` | the scheduler: `growth tick` every 5 minutes (`Persistent=true`) |
+| `growth-update.timer` | self-update every 15 minutes: the newest `main` commit whose GitHub checks passed and whose signature GitHub verified, a self-check, rollback if it fails (docs/deploy.md). `GROWTH_AUTO_UPDATE=0` when installing leaves it off |
+| `growth-app.service` | the control API for the Mac app, on `127.0.0.1:8765` only (docs/app.md) |
 
-Logs: `journalctl --user -u growth-engine.service`. Status: `python3 -m growth status`. `tick` exits
-non-zero when a job failed, so `systemctl --user status growth-engine.service` shows the failure.
+It writes `~/.config/growth-engine/env` with `GROWTH_HOME` and `PATH`, nothing secret. Secrets go
+into the **encrypted store** instead (SECURITY.md), one by one:
+
+```sh
+cd ~/growth-engine && python3 -m growth secret set <NAME>     # asks for the value; `secret list`, `secret rm`
+```
+
+| Secret | Used by |
+|---|---|
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | the deploy job (scopes in docs/deploy.md) |
+| `GROWTH_DIGEST_WEBHOOK` | optional: the digest is also POSTed there (e.g. an ntfy.sh topic URL; add its host to `[guard] outbound_allow`) |
+| `<PROJECT>_STATS_TOKEN` (name set in the project's `[waitlist] stats_token_env`) | the goal tracker reads the Worker's stats |
+| PostHog personal API key (name set in `[analytics] api_key_env`) | traffic in the digest |
+| `GITHUB_TOKEN` | optional: a read-only token raises GitHub's API limit for the update checks |
+| `APP_TOKEN` | created by the installer; the Mac app's login, fetched over SSH |
+
+Logs: `journalctl --user -u growth-engine.service` (or `-u growth-update.service`,
+`-u growth-app.service`). Status: `python3 -m growth status`. `tick` exits non-zero when a job failed,
+so `systemctl --user status growth-engine.service` shows the failure.
+
+**Guards** (engine.toml `[guard]`): `outbound_allow` lists extra hosts the engine may call, and
+`[guard.rate_limits]` caps outward actions per channel (`directory-submit = "20/24h"`). The kill
+switch: `growth kill on --reason "…"`, `growth kill off`, or the Mac app. The audit log:
+`growth audit`, `growth audit --verify`.
+
+**The Mac app:** see [app.md](app.md). It reaches the engine through `ssh geekom-wsl`, so the GEEKOM
+needs the Mac's SSH key in `~/.ssh/authorized_keys` of the WSL user and an SSH server in WSL (or a
+`ProxyJump` through Windows' OpenSSH), reachable only on the home network.
 
 **Cron instead of systemd:** `*/5 * * * * cd ~/growth-engine && GROWTH_HOME=~/growth-home python3 -m growth tick >> ~/growth-home/tick.log 2>&1`.
 The guarantees are the same, because they live in the engine, not in the timer.

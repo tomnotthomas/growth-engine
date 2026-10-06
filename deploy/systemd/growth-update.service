@@ -1,0 +1,15 @@
+# Engine self-update: fast-forward ~/growth-engine to the newest main commit whose GitHub checks passed
+# and whose signature GitHub verified, run the self-check, roll back if it fails. Installed by
+# deploy/install-wsl.sh.
+[Unit]
+Description=growth-engine: update to the newest green, signed main commit
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/growth-engine/env
+WorkingDirectory=%h/growth-engine
+ExecStart=/usr/bin/env python3 -m growth self-update
+TimeoutStartSec=45min
+Nice=10

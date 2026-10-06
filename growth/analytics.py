@@ -1,17 +1,15 @@
 """Read a project's own numbers for the digest: web traffic (PostHog) and waitlist stats (Worker).
 
-Both are read-only and keyed by environment variables, so no secret ever sits in a config file.
+Both are read-only and keyed by secrets from the encrypted store (or the environment), never a config file.
 Anything not connected is reported as "not connected" with what it needs, never guessed.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
-from urllib.parse import urlparse
 
-from . import net
+from . import net, secrets
 
 SIGNUP_ROWS = 50000
 # The PostHog project also holds the app's events; bound the scan instead of reading its whole history.
@@ -26,7 +24,7 @@ def traffic(project: Any) -> dict[str, Any]:
         return {"connected": False, "why": "no analytics provider configured ([analytics] provider)"}
     if provider != "posthog":
         return {"connected": False, "why": f"unknown analytics provider {provider!r}"}
-    key = os.environ.get(str(conf.get("api_key_env", "")), "")
+    key = secrets.get(str(conf.get("api_key_env", "")))
     if not key or not conf.get("project_id") or not conf.get("host"):
         return {"connected": False, "why": f"PostHog needs host, project_id and a personal API key in ${conf.get('api_key_env')}"}
     where = f"event = '$pageview' AND timestamp > now() - INTERVAL 7 DAY AND properties.site = '{_quote(project.id)}'"
@@ -59,7 +57,7 @@ def traffic(project: Any) -> dict[str, Any]:
 
 def waitlist_stats(project: Any) -> tuple[dict[str, Any] | None, str]:
     conf = project.raw.get("waitlist", {})
-    token = os.environ.get(str(conf.get("stats_token_env", "")), "")
+    token = secrets.get(str(conf.get("stats_token_env", "")))
     if not conf:
         return None, "no waitlist configured"
     if not token:
@@ -74,7 +72,7 @@ def waitlist_stats(project: Any) -> tuple[dict[str, Any] | None, str]:
 def posthog_signup_stats(project: Any) -> tuple[dict[str, Any] | None, str]:
     """Confirmed sign-ups per day, country and channel from PostHog's waitlist_confirmed events."""
     conf = project.analytics
-    key = os.environ.get(str(conf.get("api_key_env", "")), "")
+    key = secrets.get(str(conf.get("api_key_env", "")))
     if conf.get("provider") != "posthog" or not key or not conf.get("project_id") or not conf.get("host"):
         return None, "PostHog not connected"
     try:

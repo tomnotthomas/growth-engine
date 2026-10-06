@@ -26,6 +26,14 @@ paid services.
   (PlacesToPostYourStartup, CC0), scores each entry for the project's audience, drafts per-site
   listing text from the project's fact sheet, and from launch day on submits only where an API or a
   plain form is allowed: no captchas, no accounts. Everything else is skipped and reported.
+- **Control from the Mac.** A native menu-bar app shows the goal tracker (per day, channel and
+  country), what ran and what runs next, the Reddit drafts waiting, and the engine's health, and holds
+  every control: the kill switch, jobs and channels on, off or paused, targets, budgets, rate limits,
+  settings and the launch switch. It reaches the engine only through an SSH tunnel; the engine
+  listens on localhost and opens no port. See [docs/app.md](docs/app.md).
+- **Guarded.** Secrets encrypted at rest, least-privilege tokens, an outbound allow-list, per-channel
+  rate limits, a kill switch, and a hash-chained audit log of every automated action and every
+  control. See [SECURITY.md](SECURITY.md).
 - **Weekly digest.** For each project: what ran, traffic, sign-ups per day against the goal with
   sources and the referral k-factor, and anything blocked. Claude writes the narrative from the facts;
   text with a number that isn't in the facts is dropped.
@@ -50,14 +58,38 @@ Real projects live in a private home (for example `~/growth-home` on the always-
 | `growth status` | Last week's runs, AI budget use, anything blocked |
 | `growth channels` | Every channel and how far it may be automated |
 | `growth queue <project>` | Write the Reddit draft page and print its path |
+| `growth deploy <project>` | Build and check locally now; production only after the launch go |
+| `growth self-update` | Move to the newest green, signed main commit (the update timer calls this) |
+| `growth serve [--demo]` | The control API for the Mac app, on 127.0.0.1 only (`--demo`: made-up data, a local preview of the app) |
+| `growth kill on\|off\|status` | The kill switch |
+| `growth audit [--verify]` | The audit log and its hash chain |
+| `growth secret set\|list\|rm` | The encrypted secrets store |
+
+## CI/CD
+
+- **CI** (GitHub Actions, every push and PR): ruff and shellcheck, the unit tests on Python 3.11 and
+  3.12, the example site's build with a link check, the never-automate and guard checks, the Mac
+  app's build, and a gitleaks scan. `ci-ok` is green only when all of them are; require it for `main`.
+  CodeRabbit reviews every PR.
+- **Engine updates** (GEEKOM, every 15 minutes): fast-forward to the newest `main` commit whose checks
+  all passed and whose signature GitHub verified, self-check with the new code, restart, or roll back.
+- **Site deploys** (per project, when the built site changed): link check, a local check with
+  `wrangler dev` on the engine's machine, and an upload to Cloudflare and production only after
+  `[deploy] launched = true`, with automatic rollback. Updates and deploys show in the weekly digest and the Mac app. See [docs/deploy.md](docs/deploy.md).
+- **One-time setup by the owner:** a free Cloudflare account and an API token with only Workers
+  Scripts: Edit and D1: Edit, stored with `growth secret set CLOUDFLARE_API_TOKEN` (and
+  `CLOUDFLARE_ACCOUNT_ID`) on the GEEKOM; then require the `ci-ok` check for `main` in GitHub's branch
+  settings.
 
 ## Docs
 
 - [docs/setup.md](docs/setup.md): install on Ubuntu or WSL, the private home, systemd, keeping WSL up
 - [docs/architecture.md](docs/architecture.md): scheduler guarantees, jobs, AI budget, generator, digest
 - [docs/projects.md](docs/projects.md): project config reference
-- [docs/deploy.md](docs/deploy.md): one-command deploy to Cloudflare (free tier) and the static-only option
+- [docs/deploy.md](docs/deploy.md): the CI/CD pipeline, Cloudflare setup (free tier), the launch switch
+- [docs/app.md](docs/app.md): the Mac control app
+- [SECURITY.md](SECURITY.md): threat model and guards
 - [docs/channels.md](docs/channels.md): channels, approval gates and the never-automate list
 
-Nothing in this repository deploys, posts or sends anything by itself. Deploying is a separate,
-explicit command (`deploy/cloudflare.sh`).
+No site reaches production before the owner's launch go: until a project sets `[deploy] launched = true`
+(from the Mac app), deploys are only checked locally and nothing is uploaded.

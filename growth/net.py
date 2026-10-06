@@ -10,6 +10,7 @@ import urllib.request
 from typing import Any
 
 from . import __version__
+from .guard import check_outbound
 from .policy import check_url
 
 USER_AGENT = f"growth-engine/{__version__} (+static site generator)"
@@ -29,6 +30,7 @@ class _CheckedRedirect(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
         check_url(newurl)
+        check_outbound(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -49,6 +51,7 @@ def request(
     follow_redirects: bool = True,
 ) -> tuple[int, bytes]:
     check_url(url)
+    check_outbound(url)
     data = None
     sent = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     if body is not None:

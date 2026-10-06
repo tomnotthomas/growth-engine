@@ -9,13 +9,12 @@ the digest goes out without a narrative. The fact tables are always rendered by 
 from __future__ import annotations
 
 import json
-import os
 import re
 from collections import Counter
 from datetime import timedelta
 from typing import Any
 
-from .. import analytics, net
+from .. import analytics, guard, net, secrets
 from ..ai import AIFailed, AIUnavailable
 from ..goal import goal_report
 from ..policy import Action
@@ -23,7 +22,7 @@ from ..directories import load_catalogue, summary
 from ..queue import open_drafts
 from ..site.html import esc
 from ..store import FAILED, INTERRUPTED, MISSED
-from ..util import read_json, write_atomic
+from ..util import iso, read_json, write_atomic
 from .digest_render import render_html, render_markdown
 
 SYSTEM = (
@@ -49,6 +48,7 @@ def collect_facts(ctx: Any) -> dict[str, Any]:
     facts: dict[str, Any] = {
         "week": {"from": since.date().isoformat(), "to": ctx.now.date().isoformat()},
         "ai": {"runs_7d": ctx.store.ai_runs_since(since), "budget_per_week": engine.ai.max_runs_per_week},
+        "engine": _engine_facts(engine.state_dir, iso(since)),
         "projects": [],
     }
     for project in engine.projects.values():
@@ -82,10 +82,34 @@ def collect_facts(ctx: Any) -> dict[str, Any]:
                 "traffic": analytics.traffic(project),
                 "goal": goal,
                 "reddit_drafts_waiting": len(open_drafts(engine.state_dir, project.id)),
+                "deploys": _deploy_facts(engine.state_dir / "projects" / project.id, iso(since), project.launched),
                 "directories": _directories(engine.state_dir / "projects" / project.id),
             }
         )
     return facts
+
+
+def _engine_facts(state_dir: Any, since: str) -> dict[str, Any]:
+    """Engine updates, the kill switch and the audit chain, for the digest's engine section."""
+    updates = (read_json(state_dir / "engine" / "update.json", {}) or {}).get("history", [])
+    intact, entries, problem = guard.verify_audit(state_dir)
+    return {
+        "updates": [u for u in updates if u.get("at", "") >= since],
+        "kill_switch": guard.kill_state(state_dir),
+        "audit": {"intact": intact, "entries": entries, "problem": problem},
+    }
+
+
+def _deploy_facts(state_dir: Any, since: str, launched: bool) -> dict[str, Any] | None:
+    state = read_json(state_dir / "deploy.json", {}) or {}
+    if not state:
+        return None
+    history = [h for h in state.get("history", []) if h.get("at", "") >= since]
+    return {
+        "launched": launched,
+        "this_week": [{k: h.get(k) for k in ("at", "stage", "status", "version_id", "detail")} for h in history],
+        "live_version": state.get("last_good"),
+    }
 
 
 def _directories(state_dir: Any) -> dict[str, Any] | None:
@@ -164,7 +188,7 @@ def run(ctx: Any) -> str:
     write_atomic(folder / f"{stamp}.html", html)
     write_atomic(folder / "latest.html", html)
 
-    url = os.environ.get(str(conf.get("webhook_env", "")), "")
+    url = secrets.get(str(conf.get("webhook_env", "")))
     if url:
         action = Action(channel="digest", kind="notify", url=url)
         ctx.act(action, f"digest:{stamp}", lambda: _post(url, markdown))

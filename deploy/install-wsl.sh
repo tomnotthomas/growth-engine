@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install growth-engine as a user-level systemd timer on Ubuntu (also on WSL with systemd enabled).
+# Install growth-engine as user-level systemd units on Ubuntu (also on WSL with systemd enabled):
+# the scheduler timer, the self-update timer and the control API for the Mac app (127.0.0.1 only).
 # Usage: deploy/install-wsl.sh /path/to/private/home
 # The repository must be cloned at ~/growth-engine. Nothing is deployed or published by this script.
 set -euo pipefail
@@ -28,17 +29,32 @@ touch "$ENV_FILE"
 {
   grep -v -e '^GROWTH_HOME=' -e '^PATH=' "$ENV_FILE" || true
   echo "GROWTH_HOME=$HOME_DIR"
-  echo "PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
+  echo "PATH=$REPO/.venv/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin"
 } > "$ENV_FILE.new"
 chmod 600 "$ENV_FILE.new"
 mv "$ENV_FILE.new" "$ENV_FILE"
-echo "Put secrets (GROWTH_DIGEST_WEBHOOK, <PROJECT>_STATS_TOKEN, PostHog keys) into ~/.config/growth-engine/env, never into the repo."
+if grep -qE '^[A-Z0-9_]*(TOKEN|KEY|SECRET|WEBHOOK)[A-Z0-9_]*=' "$ENV_FILE"; then
+  echo "warning: $ENV_FILE holds secrets in plain text; move each into the encrypted store with" >&2
+  echo "  python3 -m growth secret set <NAME>   and delete the line (see SECURITY.md)" >&2
+fi
+echo "Secrets (CLOUDFLARE_API_TOKEN, <PROJECT>_STATS_TOKEN, PostHog keys, the digest webhook) go into the"
+echo "encrypted store: cd $REPO && python3 -m growth secret set <NAME>. Never into the repo or the env file."
 
-cp "$REPO/deploy/systemd/growth-engine.service" "$REPO/deploy/systemd/growth-engine.timer" "$HOME/.config/systemd/user/"
+for unit in growth-engine.service growth-engine.timer growth-update.service growth-update.timer growth-app.service; do
+  cp "$REPO/deploy/systemd/$unit" "$HOME/.config/systemd/user/"
+done
 systemctl --user daemon-reload
 systemctl --user enable --now growth-engine.timer
+if [ "${GROWTH_AUTO_UPDATE:-1}" = "1" ]; then
+  systemctl --user enable --now growth-update.timer
+else
+  echo "Auto-update left off (GROWTH_AUTO_UPDATE=0); run 'python3 -m growth self-update' by hand."
+fi
+systemctl --user enable --now growth-app.service
 loginctl enable-linger "$USER" 2>/dev/null || sudo loginctl enable-linger "$USER"
 
 (cd "$REPO" && GROWTH_HOME="$HOME_DIR" python3 -m growth check)
-systemctl --user list-timers growth-engine.timer --no-pager
-echo "Installed. Logs: journalctl --user -u growth-engine.service"
+(cd "$REPO" && GROWTH_HOME="$HOME_DIR" python3 -m growth app-token >/dev/null)
+systemctl --user list-timers 'growth-*' --no-pager
+echo "Installed. Logs: journalctl --user -u growth-engine.service (scheduler), -u growth-update.service, -u growth-app.service"
+echo "The Mac app connects with: ssh geekom-wsl (the control API listens on 127.0.0.1:8765 only)."

@@ -1,7 +1,7 @@
 """Write the waitlist Worker next to the built site, configured from the project's files.
 
-The result deploys with one `wrangler deploy` (deploy/cloudflare.sh wraps the one-time D1 and
-secret setup around it). Cloudflare's free tier covers it: Workers 100,000 requests a day, D1 5 GB
+The deploy job (growth/jobs/deploy.py) checks it locally with `wrangler dev` and only uploads and
+promotes it after the launch go. Cloudflare's free tier covers it: Workers 100,000 requests a day, D1 5 GB
 and 100,000 writes a day, static assets free.
 """
 
@@ -104,6 +104,8 @@ name = "{conf.get('worker_name', project.id + '-site')}"
 main = "worker/index.js"
 compatibility_date = "{conf.get('compatibility_date', '2026-09-01')}"
 workers_dev = false
+# No preview URLs: nothing is reachable before the launch go. The deploy job checks builds locally.
+preview_urls = false
 
 [assets]
 directory = "./public"
@@ -121,12 +123,8 @@ database_id = "{db_id}"
         out / "DEPLOY.md",
         f"""# Deploying {project.name}
 
-Nothing here is public until someone runs the deploy command.
-
-    ./deploy/cloudflare.sh {project.id}
-
-It builds the site, creates the D1 database on first use, applies schema.sql, checks the secrets
-(EMAIL_API_KEY, STATS_TOKEN, HASH_SALT) and runs `wrangler deploy` from this folder.
-See docs/deploy.md in the growth-engine repo.
+The engine's deploy job checks this folder on its own machine (`wrangler dev` with a local D1 on
+127.0.0.1). Nothing is uploaded to Cloudflare before the launch go (`[deploy] launched = true`); after
+it, each changed build is uploaded, promoted, and rolled back on its own if the live checks fail. Run it by hand with `growth deploy {project.id}`. See docs/deploy.md.
 """,
     )

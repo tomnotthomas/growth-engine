@@ -57,7 +57,37 @@ def render_markdown(facts: dict[str, Any], narrative: str, note: str) -> str:
             out.append(f"- {problem['status'].upper()} {problem['job']} at {problem['when']}: {problem['detail']}")
         for block in p["blocked"]:
             out.append(f"- BLOCKED {block['job']} [{block['rule']}]: {block['message']}")
+        for line in _deploy_lines(p.get("deploys")):
+            out.append(f"- {line}")
+    engine = facts.get("engine")
+    if engine:
+        out += ["", "## Engine", ""]
+        out += [f"- {line}" for line in _engine_lines(engine)]
     return "\n".join(out) + "\n"
+
+
+def _deploy_lines(deploys: dict[str, Any] | None) -> list[str]:
+    if not deploys:
+        return []
+    lines = [f"Deploys: {'launched, production on' if deploys['launched'] else 'not launched, local checks only'}"
+             + (f"; live version {deploys['live_version']}" if deploys.get("live_version") else "")]
+    for d in deploys["this_week"]:
+        lines.append(f"Deploy {d['stage']} {d['status']} at {d['at']}" + (f": {d['detail']}" if d.get("detail") and d["status"] != "checked" else ""))
+    return lines
+
+
+def _engine_lines(engine: dict[str, Any]) -> list[str]:
+    lines = []
+    kill = engine.get("kill_switch")
+    if kill:
+        lines.append(f"KILL SWITCH ON since {kill.get('at')} ({kill.get('by')}: {kill.get('reason')}); nothing runs")
+    for u in engine.get("updates", []):
+        lines.append(f"Update {u['status']} at {u['at']}: {u.get('from') or '?'} to {u.get('to') or '?'}; {u.get('detail', '')}")
+    if not engine.get("updates"):
+        lines.append("No engine update this week")
+    audit = engine["audit"]
+    lines.append(f"Audit log: {audit['entries']} entries, " + ("hash chain intact" if audit["intact"] else f"CHAIN BROKEN: {audit['problem']}"))
+    return lines
 
 
 def render_html(facts: dict[str, Any], narrative: str, note: str, esc: Callable[[Any], str]) -> str:
@@ -73,6 +103,7 @@ def render_html(facts: dict[str, Any], narrative: str, note: str, esc: Callable[
 <header class="mast"><h1>Growth digest</h1><p class="range">{esc(facts['week']['from'])} to {esc(facts['week']['to'])}</p></header>
 {note_html}{f'<section class="story">{story}</section>' if story else ''}
 {''.join(sections)}
+{_engine_html(facts.get("engine"), esc)}
 <p class="foot">AI runs this week: <span class="num">{esc(facts['ai']['runs_7d'])}</span> of {esc(facts['ai']['budget_per_week'])} budgeted. Numbers in tables come straight from the data, never from the AI.</p>
 </main></body></html>
 """
@@ -141,12 +172,22 @@ def _project(p: dict[str, Any], esc: Callable[[Any], str]) -> str:
     )
     if jobs:
         parts.append(f"<h3>What ran</h3><table><tr><th>Job</th><th>Runs</th></tr>{jobs}</table>")
+    deploy_lines = _deploy_lines(p.get("deploys"))
+    if deploy_lines:
+        parts.append("<h3>Deploys</h3><ul class=\"trouble\">" + "".join(f"<li>{esc(line)}</li>" for line in deploy_lines) + "</ul>")
     trouble = [f'<li><b>{esc(x["status"])}</b> {esc(x["job"])} at {esc(x["when"])}: {esc(x["detail"])}</li>' for x in p["problems"]]
     trouble += [f'<li><b>blocked</b> {esc(x["job"])} [{esc(x["rule"])}]: {esc(x["message"])}</li>' for x in p["blocked"]]
     parts.append("<h3>Needs attention</h3>" + (f'<ul class="trouble">{"".join(trouble)}</ul>' if trouble else '<p class="muted">Nothing failed or was blocked.</p>'))
     parts.append("</section>")
     return "".join(parts)
 
+
+
+def _engine_html(engine: dict[str, Any] | None, esc: Callable[[Any], str]) -> str:
+    if not engine:
+        return ""
+    items = "".join(f"<li>{esc(line)}</li>" for line in _engine_lines(engine))
+    return f'<section class="project"><h2>Engine</h2><ul class="trouble">{items}</ul></section>'
 
 
 def _markdown_to_html(text: str, esc: Callable[[Any], str]) -> str:

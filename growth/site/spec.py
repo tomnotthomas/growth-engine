@@ -86,7 +86,9 @@ def load_pages(project: "Project") -> dict[str, PageSpec]:
         raw = read_toml(file)
         pid = str(raw.get("id", file.stem))
         langs = {}
+        edits = project.raw.get("control", {}).get("pages", {}).get(pid, {})
         for lang, conf in raw.get("langs", {}).items():
+            conf = _apply_text_edits(conf, edits.get(lang, {}))
             langs[lang] = PageLang(
                 lang=lang,
                 path=str(conf.get("path", "")),
@@ -113,7 +115,38 @@ def load_pages(project: "Project") -> dict[str, PageSpec]:
     return pages
 
 
+def page_text(spec: PageLang) -> dict[str, str]:
+    """The texts a person edits from the control app: title, description, the main heading and its subline."""
+    first = spec.sections[0] if spec.sections else {}
+    headline = "\n".join(first.get("lines", [])) if first.get("type") == "hero" else str(first.get("h1", ""))
+    return {"title": spec.title, "description": spec.description, "headline": headline, "sub": str(first.get("sub", ""))}
+
+
+def _apply_text_edits(conf: dict[str, Any], edits: dict[str, str]) -> dict[str, Any]:
+    """Texts changed from the control app, over the page file (state/engine/control.json, validated like the file)."""
+    if not edits:
+        return conf
+    conf = dict(conf)
+    for key in ("title", "description"):
+        if key in edits:
+            conf[key] = edits[key]
+    sections = [dict(s) for s in conf.get("sections", [])]
+    if sections and ("headline" in edits or "sub" in edits):
+        first = sections[0]
+        if "headline" in edits:
+            if first.get("type") == "hero":
+                first["lines"] = [line for line in str(edits["headline"]).splitlines() if line.strip()]
+            elif "h1" in first:
+                first["h1"] = edits["headline"]
+        if "sub" in edits and "sub" in first:
+            first["sub"] = edits["sub"]
+    conf["sections"] = sections
+    return conf
+
+
 def load_keywords(project: "Project") -> list[dict[str, Any]]:
+    if "keywords" in project.raw.get("control", {}):  # set from the control app; replaces keywords.toml
+        return list(project.raw["control"]["keywords"])
     path = project.root / project.site.get("keywords", "keywords.toml")
     return list(read_toml(path).get("cluster", [])) if path.is_file() else []
 

@@ -4,13 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import subprocess
 import sys
 from datetime import timedelta
 from pathlib import Path
 
 from . import channels as ch
-from .config import ConfigError, Engine, default_home, load_engine
+from .config import ConfigError, Engine, default_home, load_engine, resolve_state_dir
+from .guard import Halted
 from .policy import NEVER_AUTOMATE
 from .runner import EngineBusy, run_now, tick
 from .site.html import esc
@@ -31,11 +34,27 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("job")
     build = sub.add_parser("build", help="fetch data and build one project's site now")
     build.add_argument("project")
+    deploy = sub.add_parser("deploy", help="run a project's deploy job now: a local check, and production only after the launch go")
+    deploy.add_argument("project")
+    sub.add_parser("self-update", help="move to the newest green, signed main commit; roll back if the self-check fails")
     sub.add_parser("check", help="validate engine.toml and every project")
     sub.add_parser("status", help="recent runs, AI budget, blocks")
     sub.add_parser("channels", help="every channel and how far it may be automated")
     queue = sub.add_parser("queue", help="write the Reddit draft page for a project and print its path")
     queue.add_argument("project")
+    serve = sub.add_parser("serve", help="the control API for the Mac app, on 127.0.0.1 only")
+    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--demo", action="store_true", help="serve made-up data from a throwaway copy of the example home")
+    sub.add_parser("app-token", help="print the control app's login token (the Mac app reads it over SSH)")
+    kill = sub.add_parser("kill", help="the kill switch: stop every job, deploy, update and outward action")
+    kill.add_argument("state", choices=["on", "off", "status"])
+    kill.add_argument("--reason", default="")
+    audit = sub.add_parser("audit", help="show the newest audit entries, or check the hash chain")
+    audit.add_argument("--verify", action="store_true")
+    audit.add_argument("--limit", type=int, default=30)
+    secret = sub.add_parser("secret", help="the encrypted secrets store")
+    secret.add_argument("action", choices=["set", "list", "rm"])
+    secret.add_argument("name", nargs="?")
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -45,6 +64,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "channels":
         return _channels()
+    if args.command == "secret":
+        return _secret(args.action, args.name)
+    if args.command == "app-token":
+        from .control.server import app_token
+
+        print(app_token())
+        return 0
+    if args.command == "serve" and args.demo:
+        from .control.demo import make_demo_home
+        from .control.ops import Home
+        from .control.server import serve as serve_api
+
+        serve_api(Home(make_demo_home()), args.port, demo=True)
+        return 0
+    if args.command in ("kill", "audit"):
+        return _guard_command(args)
     try:
         engine = load_engine(args.home or default_home())
     except ConfigError as exc:
@@ -53,10 +88,32 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "check":
         return _check(engine)
+    if args.command == "self-update":
+        from .net import HttpError
+        from .update import Outcome, UpdateError, record_once, update
+
+        try:
+            outcome = update(engine.root, engine.state_dir)
+        except (Halted, EngineBusy) as exc:
+            record_once(engine.state_dir, Outcome("skipped", str(exc)))
+            print(f"update skipped: {exc}")
+            return 0
+        except (UpdateError, HttpError, OSError, subprocess.SubprocessError) as exc:
+            record_once(engine.state_dir, Outcome("failed", str(exc)))
+            print(f"update failed: {exc}", file=sys.stderr)
+            return 1
+        print(f"{outcome.status}: {outcome.detail}")
+        return 1 if outcome.status == "rolled-back" else 0
+    if args.command == "serve":
+        from .control.ops import Home
+        from .control.server import serve as serve_api
+
+        serve_api(Home(engine.root), args.port)
+        return 0
     if args.command == "status":
         return _status(engine)
     project = None
-    if args.command in ("queue", "build"):
+    if args.command in ("queue", "build", "deploy"):
         project = engine.projects.get(args.project)
         if project is None:
             known = ", ".join(sorted(engine.projects)) or "none"
@@ -77,6 +134,16 @@ def main(argv: list[str] | None = None) -> int:
             status = run_now(engine, args.scope, args.job)
             print(status)
             return 0 if status in ("ok", "already ran") else 1
+        if args.command == "deploy" and project is not None:
+            jobs = [j.id for j in project.jobs.values() if j.kind == "deploy" and j.enabled]
+            if not jobs:
+                print(f"{project.id} has no enabled deploy job; add [jobs.deploy] kind = \"deploy\" (docs/deploy.md)", file=sys.stderr)
+                return 1
+            status = run_now(engine, project.id, jobs[0])
+            print(f"{jobs[0]}: {status}")
+            if status != "ok":
+                _print_last(engine, project.id, jobs[0])
+            return 0 if status == "ok" else 1
         if args.command == "build" and project is not None:
             for job in ("fetch-data", "build-site"):
                 matches = [j.id for j in project.jobs.values() if j.kind == job and j.enabled]
@@ -90,6 +157,9 @@ def main(argv: list[str] | None = None) -> int:
     except EngineBusy as exc:
         print(f"busy: {exc}", file=sys.stderr)
         return 0 if args.command == "tick" else 1
+    except Halted as exc:
+        print(f"halted: {exc}", file=sys.stderr)
+        return 1
     except KeyError as exc:
         print(exc.args[0], file=sys.stderr)
         return 1
@@ -133,6 +203,55 @@ def _print_last(engine: Engine, scope: str, job: str) -> None:
             print(runs[-1].summary, file=sys.stderr)
     finally:
         store.close()
+
+
+def _secret(action: str, name: str | None) -> int:
+    import getpass
+
+    from . import secrets
+
+    try:
+        if action == "list":
+            for key in secrets.names():
+                print(key)
+            return 0
+        if not name:
+            print("name the secret, e.g. growth secret set CLOUDFLARE_API_TOKEN", file=sys.stderr)
+            return 2
+        if action == "rm":
+            print("removed" if secrets.delete(name) else "no such secret")
+            return 0
+        value = getpass.getpass(f"{name}: ") if sys.stdin.isatty() else sys.stdin.read().strip()
+        if not value:
+            print("empty value; nothing stored", file=sys.stderr)
+            return 1
+        secrets.put(name, value)
+        print(f"stored {name} (encrypted, backend {secrets.backend()})")
+        return 0
+    except secrets.SecretsError as exc:
+        print(exc, file=sys.stderr)
+        return 1
+
+
+def _guard_command(args: argparse.Namespace) -> int:
+    from . import guard
+
+    state = resolve_state_dir(args.home or default_home())
+    if args.command == "kill":
+        if args.state == "status":
+            current = guard.kill_state(state)
+            print(f"ON since {current.get('at')} by {current.get('by')}: {current.get('reason')}" if current else "off")
+            return 0
+        guard.set_kill(state, args.state == "on", reason=args.reason, actor="cli")
+        print(f"kill switch {args.state}")
+        return 0
+    if args.verify:
+        intact, count, problem = guard.verify_audit(state)
+        print(f"audit log intact: {count} entries" if intact else f"audit log BROKEN after {count} entries: {problem}")
+        return 0 if intact else 1
+    for entry in reversed(guard.read_audit(state, args.limit)):
+        print(f"{entry['at']}  {entry['actor']:8} {entry['scope']:12} {entry['event']:22} {json.dumps(entry['detail'], ensure_ascii=False)[:160]}")
+    return 0
 
 
 def _channels() -> int:

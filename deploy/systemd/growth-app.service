@@ -1,0 +1,20 @@
+# The control API for the Mac app. It listens on 127.0.0.1 only; the Mac reaches it through an SSH
+# tunnel (ssh -L ... geekom-wsl). Nothing on the GEEKOM is opened to the network.
+[Unit]
+Description=growth-engine: control API for the Mac app (127.0.0.1 only)
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/growth-engine/env
+WorkingDirectory=%h/growth-engine
+ExecStart=/usr/bin/env python3 -m growth serve --port 8765
+Restart=on-failure
+RestartSec=10
+# Light: one small Python process; it reads state on request and refreshes sign-up numbers at most
+# every ten minutes.
+MemoryMax=256M
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

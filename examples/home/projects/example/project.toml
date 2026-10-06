@@ -83,6 +83,14 @@ target = 5000
 days = 46
 start = ""
 
+[deploy]
+launched = false                          # the owner's launch go: only then does a deploy reach production
+
+[jobs.deploy]
+kind = "deploy"
+schedule = "every 15m"                    # deploys only when the built site changed
+enabled = false                           # switch on once the Cloudflare token is in the secrets store
+
 [jobs.fetch-data]
 kind = "fetch-data"
 schedule = "every 6h"
