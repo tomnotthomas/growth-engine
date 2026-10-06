@@ -18,7 +18,7 @@ enum SelfTest {
         func project() -> Project? { store.dashboard?.projects.first { $0.id == store.selectedProjectID } }
 
         check("connects and loads the dashboard", await store.refresh())
-        guard let first = store.dashboard?.projects.first else { print("FAIL no project"); exit(1) }
+        guard let first = store.dashboard?.projects.first else { print("FAIL no project (\(store.link))"); exit(1) }
         check("the engine is not demo data", store.dashboard?.demo == false)
         store.selectedProjectID = first.id
         let pid = first.id
