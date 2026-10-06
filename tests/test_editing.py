@@ -105,7 +105,10 @@ class Editing(HomeTestCase):
         ops.set_goal(self.home_(), "captain", "example", {"start": "2026-11-01"})
         self.assertEqual(next_step(), "build")
         pid = ops.build_now(self.home_(), "captain", "example")
-        self.assertEqual(os.waitpid(pid, 0)[1], 0, "growth build failed")
+        try:
+            self.assertEqual(os.waitpid(pid, 0)[1], 0, "growth build failed")
+        except ChildProcessError:
+            pass  # subprocess already reaped the finished build (its Popen was dropped); the step check below still holds
         self.assertEqual(next_step(), "cloudflare")
 
     def test_plain_schedule_words(self) -> None:

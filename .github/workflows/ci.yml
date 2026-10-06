@@ -88,8 +88,9 @@ jobs:
           cp -R examples/home "$RUNNER_TEMP/home"
           python -m growth --home "$RUNNER_TEMP/home" serve --port 8799 > "$RUNNER_TEMP/serve.log" 2>&1 &
           sleep 3
+          # The app runs this in a login shell, which does not keep setup-python's PATH: name the interpreter.
           "mac/build/Growth Engine.app/Contents/MacOS/GrowthEngine" --selftest --port 8799 \
-            --token-command "cd '$GITHUB_WORKSPACE' && python -m growth app-token"
+            --token-command "cd '$GITHUB_WORKSPACE' && '$(command -v python)' -m growth app-token"
 
   secrets:
     runs-on: ubuntu-latest
