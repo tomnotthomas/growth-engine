@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import subprocess
 import sys
 from datetime import timedelta
 from pathlib import Path
@@ -33,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     run.add_argument("job")
     build = sub.add_parser("build", help="fetch data and build one project's site now")
     build.add_argument("project")
-    deploy = sub.add_parser("deploy", help="run a project's deploy job now: preview, and production only after the launch go")
+    deploy = sub.add_parser("deploy", help="run a project's deploy job now: a local check, and production only after the launch go")
     deploy.add_argument("project")
     sub.add_parser("self-update", help="move to the newest green, signed main commit; roll back if the self-check fails")
     sub.add_parser("check", help="validate engine.toml and every project")
@@ -88,11 +89,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "check":
         return _check(engine)
     if args.command == "self-update":
-        from .update import UpdateError, update
+        from .net import HttpError
+        from .update import Outcome, UpdateError, record_once, update
 
         try:
             outcome = update(engine.root, engine.state_dir)
-        except UpdateError as exc:
+        except (Halted, EngineBusy) as exc:
+            record_once(engine.state_dir, Outcome("skipped", str(exc)))
+            print(f"update skipped: {exc}")
+            return 0
+        except (UpdateError, HttpError, OSError, subprocess.SubprocessError) as exc:
+            record_once(engine.state_dir, Outcome("failed", str(exc)))
             print(f"update failed: {exc}", file=sys.stderr)
             return 1
         print(f"{outcome.status}: {outcome.detail}")

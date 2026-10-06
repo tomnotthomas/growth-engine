@@ -69,10 +69,10 @@ def render_markdown(facts: dict[str, Any], narrative: str, note: str) -> str:
 def _deploy_lines(deploys: dict[str, Any] | None) -> list[str]:
     if not deploys:
         return []
-    lines = [f"Deploys: {'launched, production on' if deploys['launched'] else 'not launched, previews only'}"
+    lines = [f"Deploys: {'launched, production on' if deploys['launched'] else 'not launched, local checks only'}"
              + (f"; live version {deploys['live_version']}" if deploys.get("live_version") else "")]
     for d in deploys["this_week"]:
-        lines.append(f"Deploy {d['stage']} {d['status']} at {d['at']}" + (f": {d['detail']}" if d.get("detail") and d["status"] != "previewed" else ""))
+        lines.append(f"Deploy {d['stage']} {d['status']} at {d['at']}" + (f": {d['detail']}" if d.get("detail") and d["status"] != "checked" else ""))
     return lines
 
 

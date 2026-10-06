@@ -59,7 +59,7 @@ struct ProjectSettingsView: View {
                 Button("Launch: allow production deploys") { Task { _ = await store.setSettings(project.id, ["launched": true]) } }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("The next deploy that passes its preview checks goes live on \(project.baseUrl). This is the go the engine waits for; it is recorded in the audit log.")
+                Text("The next deploy that passes its local check goes live on \(project.baseUrl). This is the go the engine waits for; it is recorded in the audit log.")
             }
         }
     }
@@ -106,8 +106,8 @@ struct LaunchRow: View {
                 .font(.title2).foregroundStyle(project.launched ? Theme.accent : .secondary).frame(width: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text(project.launched ? "Launched: production deploys are on" : "Not launched: nothing goes public").font(.callout.weight(.semibold))
-                Text(project.launched ? "Deploys pass a preview check, go live, and roll back on their own if the live checks fail."
-                                      : "Deploys stop at a private preview. Production waits for this switch.")
+                Text(project.launched ? "Deploys pass a local check, go live, and roll back on their own if the live checks fail."
+                                      : "Deploys are only checked on the engine's own machine; nothing is uploaded. Production waits for this switch.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -130,10 +130,10 @@ struct DeploySummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            row("Preview", deploy.preview)
+            row("Local check", deploy.check)
             row("Production", deploy.production)
-            if deploy.preview == nil && deploy.production == nil {
-                Text("No deploy yet. The deploy job publishes a preview whenever the built site changes.")
+            if deploy.check == nil && deploy.production == nil {
+                Text("No deploy yet. The deploy job checks the site locally whenever the built site changes.")
                     .font(.callout).foregroundStyle(.secondary)
             }
         }
@@ -144,7 +144,7 @@ struct DeploySummary: View {
         if let record {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 StatusDot(color: Theme.status(record.status))
-                Text(title).font(.callout.weight(.medium)).frame(width: 80, alignment: .leading)
+                Text(title).font(.callout.weight(.medium)).frame(width: 90, alignment: .leading)
                 Text("\(record.status ?? "") \(Fmt.ago(record.at))").font(.callout).foregroundStyle(.secondary)
                 if let url = record.url, let link = URL(string: url) { Link(url, destination: link).font(.caption) }
                 Spacer()

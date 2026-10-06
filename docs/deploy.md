@@ -1,8 +1,10 @@
 # Deploying a project's site and waitlist
 
-Nothing is public before the owner's launch go. Until then every deploy stops at a private preview,
-and until a project sets `[site] indexable = true` (which needs the decided domain and the legal-notice
-and privacy pages) every page also carries `noindex` and `robots.txt` disallows everything.
+Nothing is public before the owner's launch go. Until then a deploy only builds the site and checks
+it on the engine's own machine (`wrangler dev` with a throwaway local D1, on 127.0.0.1); nothing is
+uploaded to Cloudflare, there are no preview URLs, and the production D1 is not touched. Until a
+project sets `[site] indexable = true` (which needs the decided domain and the legal-notice and privacy
+pages) every page also carries `noindex` and `robots.txt` disallows everything.
 
 ## The pipeline
 
@@ -13,9 +15,10 @@ main on GitHub ──► GEEKOM growth-update timer (every 15 min): newest main 
                      and a GitHub-verified signature ──► fast-forward under the engine lock ──►
                      self-check (growth check + unit tests) ──► restart, or roll back and skip it
 built site changed (content or engine) ──► deploy job (every 15 min, per project):
-                     build ──► link check ──► D1 + schema ──► wrangler versions upload (private preview)
-                     ──► smoke checks on the preview ──► [deploy] launched = true? ──► promote to 100%
-                     ──► smoke checks on the domain ──► on failure: back to the last good version
+                     build ──► link check ──► local check (wrangler dev + local D1 on 127.0.0.1)
+                     ──► [deploy] launched = true? ──► D1 + schema ──► wrangler versions upload
+                     ──► promote to 100% ──► smoke checks on the domain ──► on failure: back to the
+                     last good version (a rolled-back build is not promoted again; the next one is)
 ```
 
 Every step of a deploy goes through the same guards as any outward action: the kill switch, the
@@ -59,10 +62,11 @@ By hand: `growth deploy <project>` (or `deploy/cloudflare.sh <project>`), same r
 5. In the project: `[waitlist] email_provider` set to `brevo` or `resend` (the default `log` only
    prints mails and blocks production), `email_from` on the verified domain, `[goal] start`.
 
-The deploy job creates the D1 database on its first run and keeps its id in
-`state/projects/<id>/deploy.json`. Previews live on unlisted `*.workers.dev` preview URLs. Anyone with the
-exact URL can open one, and they share the production D1 database, so the smoke checks only read
-(`/api/waitlist/count`). Before `[site] indexable` the pages carry `noindex` there too.
+After the launch go, the deploy job creates the D1 database on its first run and keeps its id in
+`state/projects/<id>/deploy.json`. The generated `wrangler.toml` sets `preview_urls = false`, so an
+uploaded version is never reachable on its own URL; the check before promoting is the local one, and
+the live smoke checks only read (`/api/waitlist/count`). A build checked before the launch goes live on
+the first deploy run after the switch is turned on.
 
 Until `EMAIL_API_KEY` exists, the Worker answers sign-ups with "opens soon" and stores nothing.
 
@@ -83,6 +87,6 @@ the minimum. That is the owner's call; nothing is bought by the engine.
 ## Why Workers static assets and not Pages
 
 The site and the waitlist ship as one Worker with static assets: the forms post to `/api/*` on the
-same origin, one upload versions both together, and Cloudflare's version API gives the preview,
+same origin, one upload versions both together, and Cloudflare's version API gives the upload,
 promote and rollback steps directly. It is on the same free tier as Pages. A site without
 `[waitlist]` is plain static output in `dist/<out>/public/` and can also go to Pages or GitHub Pages.

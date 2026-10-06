@@ -49,11 +49,9 @@ _PROJECT = re.compile(r"^/api/projects/([a-z0-9][a-z0-9-]*)/(pause|channel|goal|
 
 def app_token(create: bool = True) -> str:
     """The control app's login token, kept in the encrypted secrets store."""
-    token = secrets.load().get(TOKEN_NAME, "")
-    if not token and create:
-        token = pysecrets.token_urlsafe(32)
-        secrets.put(TOKEN_NAME, token)
-    return token
+    if create:
+        return secrets.setdefault(TOKEN_NAME, lambda: pysecrets.token_urlsafe(32))
+    return secrets.load().get(TOKEN_NAME, "")
 
 
 class ControlServer(ThreadingHTTPServer):
@@ -96,8 +94,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _authorized(self) -> bool:
         given = self.headers.get("Authorization", "")
-        expected = f"Bearer {self.server.token}"
-        if self.server.token and hmac.compare_digest(given.encode(), expected.encode()):
+        token = self.server.token
+        expected = f"Bearer {token}"
+        # The public demo token only ever opens a demo server's throwaway home.
+        if token and (self.server.demo or token != DEMO_TOKEN) and hmac.compare_digest(given.encode(), expected.encode()):
             return True
         self._send(401, {"error": "not logged in"})
         return False

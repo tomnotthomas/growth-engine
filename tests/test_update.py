@@ -7,10 +7,15 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from growth import guard
+from growth import guard, net
+from growth.cli import main
+from growth.runner import EngineBusy
 from growth.update import update
 from growth.util import read_json
+
+from .helpers import HomeTestCase
 
 
 def git(cwd: Path, *args: str) -> str:
@@ -105,6 +110,31 @@ class SelfUpdate(unittest.TestCase):
         guard.set_kill(self.state, True, reason="hold", actor="cli")
         with self.assertRaises(guard.Halted):
             self.run_update()
+
+
+class SelfUpdateCommand(HomeTestCase):
+    def self_update(self) -> int:
+        return main(["--home", str(self.home), "self-update"])
+
+    def history(self) -> list[dict]:
+        return read_json(self.home / "state" / "engine" / "update.json", {}).get("history", [])
+
+    def test_a_halted_engine_skips_cleanly_and_says_so(self) -> None:
+        guard.set_kill(self.home / "state", True, reason="hold", actor="cli")
+        self.assertEqual(self.self_update(), 0)
+        self.assertEqual(self.history()[-1]["status"], "skipped")
+
+    def test_a_busy_engine_skips_cleanly(self) -> None:
+        with mock.patch("growth.update.update", side_effect=EngineBusy("another growth process holds the engine lock")):
+            self.assertEqual(self.self_update(), 0)
+        self.assertEqual(self.history()[-1]["status"], "skipped")
+
+    def test_network_errors_are_recorded_once_and_exit_without_a_traceback(self) -> None:
+        with mock.patch("growth.update.update", side_effect=net.HttpError("GET https://api.github.com failed: timed out")):
+            self.assertEqual(self.self_update(), 1)
+            self.assertEqual(self.self_update(), 1)
+        self.assertEqual([h["status"] for h in self.history()], ["failed"])
+        self.assertEqual(guard.read_audit(self.home / "state", 1)[0]["event"], "update.failed")
 
 
 if __name__ == "__main__":

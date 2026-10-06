@@ -19,13 +19,16 @@ values without a store. Values never appear in logs, the audit log or the contro
 from __future__ import annotations
 
 import base64
+import fcntl
 import hashlib
 import hmac
 import json
 import os
 import shutil
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Callable, Iterator
 
 from .util import write_atomic
 
@@ -185,18 +188,41 @@ def _save(values: dict[str, str]) -> None:
     forget_cache()
 
 
+@contextmanager
+def _locked() -> Iterator[None]:
+    """One writer at a time across processes: master-key creation and every load-modify-save."""
+    folder = config_dir()
+    folder.mkdir(parents=True, exist_ok=True)
+    os.chmod(folder, 0o700)
+    with open(folder / "secrets.lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
 def put(name: str, value: str) -> None:
-    values = load()
-    values[check_name(name)] = value
-    _save(values)
+    with _locked():
+        values = load()
+        values[check_name(name)] = value
+        _save(values)
+
+
+def setdefault(name: str, make: Callable[[], str]) -> str:
+    """The stored value, or a new one from `make()`, stored; one answer for every concurrent caller."""
+    with _locked():
+        values = load()
+        if not values.get(check_name(name)):
+            values[name] = make()
+            _save(values)
+        return values[name]
 
 
 def delete(name: str) -> bool:
-    values = load()
-    if values.pop(check_name(name), None) is None:
-        return False
-    _save(values)
-    return True
+    with _locked():
+        values = load()
+        if values.pop(check_name(name), None) is None:
+            return False
+        _save(values)
+        return True
 
 
 def names() -> list[str]:

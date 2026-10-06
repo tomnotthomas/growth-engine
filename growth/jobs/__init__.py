@@ -92,7 +92,7 @@ JOB_KINDS: dict[str, JobKind] = {
             ai=None,
             idempotent=True,
             channel="website",
-            description="When the built site changed: preview on Cloudflare, check it, and only after the launch go promote to production (rolls back if the live checks fail).",
+            description="When the built site changed: check it locally, and only after the launch go upload and promote it to production (rolls back if the live checks fail).",
         ),
         JobKind(
             "digest",

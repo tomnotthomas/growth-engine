@@ -1,7 +1,7 @@
 """Write the waitlist Worker next to the built site, configured from the project's files.
 
-The deploy job (growth/jobs/deploy.py) uploads it as a preview version and promotes it after the
-launch go. Cloudflare's free tier covers it: Workers 100,000 requests a day, D1 5 GB
+The deploy job (growth/jobs/deploy.py) checks it locally with `wrangler dev` and only uploads and
+promotes it after the launch go. Cloudflare's free tier covers it: Workers 100,000 requests a day, D1 5 GB
 and 100,000 writes a day, static assets free.
 """
 
@@ -104,8 +104,8 @@ name = "{conf.get('worker_name', project.id + '-site')}"
 main = "worker/index.js"
 compatibility_date = "{conf.get('compatibility_date', '2026-09-01')}"
 workers_dev = false
-# Each uploaded version gets a private preview URL; the deploy job checks it before production.
-preview_urls = true
+# No preview URLs: nothing is reachable before the launch go. The deploy job checks builds locally.
+preview_urls = false
 
 [assets]
 directory = "./public"
@@ -123,8 +123,8 @@ database_id = "{db_id}"
         out / "DEPLOY.md",
         f"""# Deploying {project.name}
 
-The engine's deploy job uploads this folder as a private preview version and checks it. Production
-is only reached after the launch go (`[deploy] launched = true`), and rolls back on its own if the
-live checks fail. Run it by hand with `growth deploy {project.id}`. See docs/deploy.md.
+The engine's deploy job checks this folder on its own machine (`wrangler dev` with a local D1 on
+127.0.0.1). Nothing is uploaded to Cloudflare before the launch go (`[deploy] launched = true`); after
+it, each changed build is uploaded, promoted, and rolled back on its own if the live checks fail. Run it by hand with `growth deploy {project.id}`. See docs/deploy.md.
 """,
     )

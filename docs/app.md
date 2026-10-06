@@ -64,7 +64,9 @@ python3 -m growth serve --demo          # made-up data from the example project,
 ```
 
 Then in the app's Settings choose "This Mac" with the token `demo`. A banner marks the data as
-demo data.
+demo data. This is a local preview only: the demo server listens on 127.0.0.1, serves a throwaway
+copy of the example home, and controls nothing real. The token `demo` is accepted only by a demo
+server; a server for a real home refuses it, even if it was stored as `APP_TOKEN`.
 
 ## Light on memory
 

@@ -221,7 +221,7 @@ struct Block: Decodable, Identifiable {
 }
 
 struct DeployState: Decodable {
-    var preview: DeployRecord?
+    var check: DeployRecord?
     var production: DeployRecord?
     var lastGood: String?
     var history: [DeployRecord]?

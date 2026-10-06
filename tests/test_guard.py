@@ -54,6 +54,21 @@ class Secrets(HomeTestCase):
         with self.assertRaises(secrets.SecretsError):
             secrets.put("not a name", "x")
 
+    def test_concurrent_first_writers_agree_on_one_key_and_one_token(self) -> None:
+        import subprocess
+        import sys
+
+        from .helpers import REPO
+
+        procs = [
+            subprocess.Popen([sys.executable, "-m", "growth", "app-token"], cwd=REPO, stdout=subprocess.PIPE, text=True)
+            for _ in range(6)
+        ]
+        tokens = {proc.communicate(timeout=120)[0].strip() for proc in procs}
+        self.assertEqual(len(tokens), 1)
+        secrets.forget_cache()
+        self.assertEqual(secrets.load()["APP_TOKEN"], tokens.pop())
+
 
 class KillSwitch(HomeTestCase):
     def test_a_halted_engine_runs_nothing_and_misses_nothing(self) -> None:

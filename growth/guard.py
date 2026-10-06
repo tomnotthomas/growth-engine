@@ -224,8 +224,6 @@ def derive_hosts(engine: Any) -> set[str]:
     hosts = set(BUILTIN_HOSTS) | {str(h) for h in engine.guard.get("outbound_allow", [])}
     for project in engine.projects.values():
         hosts.add(hostname(project.site.get("base_url", "")))
-        if any(job.kind == "deploy" for job in project.jobs.values()):
-            hosts.add("*.workers.dev")  # the deploy job's preview URLs
         for source in project.data.values():
             if source.get("url"):
                 hosts.add(hostname(str(source["url"])))

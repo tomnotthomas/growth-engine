@@ -10,7 +10,7 @@ import threading
 from growth import guard
 from growth.control import ops
 from growth.control.demo import make_demo_home
-from growth.control.server import ControlServer
+from growth.control.server import DEMO_TOKEN, ControlServer
 from growth.control.snapshot import snapshot
 
 from .helpers import HomeTestCase
@@ -73,6 +73,28 @@ class ControlAPI(HomeTestCase):
         self.assertEqual(self.call("POST", "/api/projects/nope/pause", {"paused": True})[0], 409)
         self.assertEqual(self.call("POST", "/api/projects/example/settings", {"base_url": "http://plain.example"})[0], 409)
         self.assertEqual(self.call("POST", "/api/projects/example/settings", {"theme": "x"})[0], 409)
+
+
+class DemoToken(HomeTestCase):
+    def serve(self, home, token: str, demo: bool) -> int:
+        server = ControlServer(0, ops.Home(home), token, demo=demo)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=20)
+        conn.request("GET", "/api/dashboard", headers={"Authorization": f"Bearer {DEMO_TOKEN}"})
+        status = conn.getresponse().status
+        conn.close()
+        self.assertEqual(server.server_address[0], "127.0.0.1")
+        return status
+
+    def test_a_real_home_refuses_the_demo_token_even_when_stored(self) -> None:
+        self.assertEqual(self.serve(self.home, DEMO_TOKEN, demo=False), 401)
+
+    def test_the_demo_server_accepts_it_for_its_throwaway_home(self) -> None:
+        home = make_demo_home()
+        self.addCleanup(shutil.rmtree, home.parent, True)
+        self.assertEqual(self.serve(home, DEMO_TOKEN, demo=True), 200)
 
 
 class Demo(HomeTestCase):

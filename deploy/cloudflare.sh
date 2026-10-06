@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Deploy one project now: build, upload a private preview version, check it, and promote it to
-# production only when the project says [deploy] launched = true (the owner's launch go).
+# Deploy one project now: build and check it locally; upload and promote it to production only
+# when the project says [deploy] launched = true (the owner's launch go).
 # The scheduled deploy job does the same on its own; this is the by-hand path.
 # Usage: GROWTH_HOME=/path/to/home deploy/cloudflare.sh <project>
 set -euo pipefail

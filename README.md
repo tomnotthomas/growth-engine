@@ -58,9 +58,9 @@ Real projects live in a private home (for example `~/growth-home` on the always-
 | `growth status` | Last week's runs, AI budget use, anything blocked |
 | `growth channels` | Every channel and how far it may be automated |
 | `growth queue <project>` | Write the Reddit draft page and print its path |
-| `growth deploy <project>` | Preview deploy now; production only after the launch go |
+| `growth deploy <project>` | Build and check locally now; production only after the launch go |
 | `growth self-update` | Move to the newest green, signed main commit (the update timer calls this) |
-| `growth serve [--demo]` | The control API for the Mac app, on 127.0.0.1 only |
+| `growth serve [--demo]` | The control API for the Mac app, on 127.0.0.1 only (`--demo`: made-up data, a local preview of the app) |
 | `growth kill on\|off\|status` | The kill switch |
 | `growth audit [--verify]` | The audit log and its hash chain |
 | `growth secret set\|list\|rm` | The encrypted secrets store |
@@ -73,9 +73,9 @@ Real projects live in a private home (for example `~/growth-home` on the always-
   CodeRabbit reviews every PR.
 - **Engine updates** (GEEKOM, every 15 minutes): fast-forward to the newest `main` commit whose checks
   all passed and whose signature GitHub verified, self-check with the new code, restart, or roll back.
-- **Site deploys** (per project, when the built site changed): link check, a private preview on
-  Cloudflare with smoke checks, and production only after `[deploy] launched = true`, with automatic
-  rollback. Updates and deploys show in the weekly digest and the Mac app. See [docs/deploy.md](docs/deploy.md).
+- **Site deploys** (per project, when the built site changed): link check, a local check with
+  `wrangler dev` on the engine's machine, and an upload to Cloudflare and production only after
+  `[deploy] launched = true`, with automatic rollback. Updates and deploys show in the weekly digest and the Mac app. See [docs/deploy.md](docs/deploy.md).
 - **One-time setup by the owner:** a free Cloudflare account and an API token with only Workers
   Scripts: Edit and D1: Edit, stored with `growth secret set CLOUDFLARE_API_TOKEN` (and
   `CLOUDFLARE_ACCOUNT_ID`) on the GEEKOM; then require the `ci-ok` check for `main` in GitHub's branch
@@ -92,4 +92,4 @@ Real projects live in a private home (for example `~/growth-home` on the always-
 - [docs/channels.md](docs/channels.md): channels, approval gates and the never-automate list
 
 No site reaches production before the owner's launch go: until a project sets `[deploy] launched = true`
-(from the Mac app), deploys stop at a private preview.
+(from the Mac app), deploys are only checked locally and nothing is uploaded.

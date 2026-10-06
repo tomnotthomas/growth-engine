@@ -45,7 +45,7 @@ class UpdateError(Exception):
 
 @dataclass
 class Outcome:
-    status: str  # up-to-date, updated, rolled-back, refused, no-green-commit
+    status: str  # up-to-date, updated, rolled-back, refused, no-green-commit, skipped, failed
     detail: str
     from_sha: str = ""
     to_sha: str = ""
@@ -236,9 +236,13 @@ def update(
 
 
 def _refuse(state_dir: Path, why: str) -> Outcome:
-    outcome = Outcome("refused", why)
+    return record_once(state_dir, Outcome("refused", why))
+
+
+def record_once(state_dir: Path, outcome: Outcome) -> Outcome:
+    """Record an outcome unless it repeats the last one: a stuck state is reported once, not every 15 minutes."""
     data = read_json(state_dir / "engine" / "update.json", {}) or {}
     last = (data.get("history") or [{}])[-1]
-    if last.get("status") != "refused" or last.get("detail") != why:  # report a stuck checkout once, not every 15 minutes
+    if last.get("status") != outcome.status or last.get("detail") != outcome.detail[:600]:
         _record(state_dir, outcome)
     return outcome

@@ -33,7 +33,7 @@ projects/<id>/
 | `[analytics]` | `provider` (`none` or `posthog`), `capture_host` and `project_api_key` (the public write key; events go through the Worker's `/api/e` relay, cookieless, no IP and no person profile), `host`, `project_id` and `api_key_env` (the name of the personal read key in the secrets store, for the digest's traffic and funnel; the goal numbers come from the waitlist ledger, and from PostHog only as a labelled estimate when the ledger is not reachable) |
 | `[directories]` | `source` (URL or a file in the project), `audience_terms`, `regions`, `exclude_terms`, `fact_sheet`, `voice`, `draft_batch`, `submit` (verified sites), `launch_date` (default: `[goal] start`) |
 | `[[site]]` in the `submit` file | `id` (catalogue id: host without `www.` plus path), `method` (`api` or `form`), `endpoint` (https, on the same site), `fields`, `captcha = false`, `account = false`, `terms_url`, `terms_checked` (YYYY-MM-DD), `terms_allow_automation` (default false; only the boolean `true` allows automatic submission) |
-| `[deploy]` | `launched` (default `false`: deploys stop at a private preview; `true` is the owner's launch go and needs `[site] domain_decided`). Set it from the Mac app. |
+| `[deploy]` | `launched` (default `false`: deploys are only checked locally, nothing is uploaded; `true` is the owner's launch go and needs `[site] domain_decided`). Set it from the Mac app. |
 | `[guard]` | `rate_limits` (per channel, e.g. `{ directory-submit = "10/24h" }`; overrides the engine's) |
 | `[jobs.<id>]` | `kind`, `schedule`, `enabled`, `catchup` (`latest`, `all` or `skip`), `max_late`, `max_attempts`, plus kind parameters (`key` for indexnow; the build publishes it as `/<key>.txt`) |
 

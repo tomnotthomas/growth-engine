@@ -30,7 +30,7 @@ enum Theme {
 
     static func status(_ status: String?) -> Color {
         switch status {
-        case "ok", "updated", "promoted", "previewed": return good
+        case "ok", "updated", "promoted", "checked": return good
         case "failed", "rolled-back", "interrupted", "blocked": return bad
         case "running", "deferred", "missed": return warn
         default: return .secondary
