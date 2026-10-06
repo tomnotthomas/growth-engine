@@ -1,0 +1,26 @@
+# Example engine home. A real home lives outside the repository (e.g. ~/growth-home on the always-on
+# PC) and holds the private project folders; copy this file there and adjust. See docs/setup.md.
+
+timezone = "Europe/Berlin"
+state_dir = "state"
+dist_dir = "dist"
+projects_dir = "projects"
+
+[ai]
+command = ["claude"]
+extra_args = []
+max_runs_per_day = 3
+max_runs_per_week = 10
+per_project_runs_per_week = 4
+window = "01:00-07:00"
+timeout = "15m"
+cooldown_after_limit = "5h"
+
+[digest]
+language = "English"
+webhook_env = "GROWTH_DIGEST_WEBHOOK"
+
+[jobs.weekly-digest]
+kind = "digest"
+schedule = "weekly mon 05:30"
+max_late = "2d"

@@ -1,0 +1,36 @@
+# Private engine homes, state and build output never belong in this public repository.
+/state/
+/dist/
+/home/
+/growth-home/
+examples/home/state/
+examples/home/dist/
+*.db
+*.db-wal
+*.db-shm
+*.lock
+
+# Secrets
+.env
+.env.*
+.dev.vars
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+build/
+
+# Node (wrangler, local worker tests)
+node_modules/
+.wrangler/
+
+# OS and editors
+.DS_Store
+.idea/
+.vscode/

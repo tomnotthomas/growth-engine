@@ -1,0 +1,47 @@
+# Curated facts per plugin; see the engine docs for the fields.
+
+[[item]]
+id = 1
+slug = "tapeworm-delay"
+name = "Tapeworm Delay"
+status = "playable"
+native_version = "none"
+searches = 120
+wave = 1
+free = true
+measurement = "tapeworm"
+similar = ["glasshouse-reverb"]
+facts = [{ label = "Runs natively", value = "Windows only", tone = "no" }]
+verdict = "Tapeworm Delay only ships for Windows. With {brand} it runs in your browser on any computer."
+
+[[item]]
+id = 2
+slug = "glasshouse-reverb"
+name = "Glasshouse Reverb"
+status = "playable"
+native_version = "none"
+searches = 80
+wave = 1
+
+[[item]]
+id = 3
+slug = "mothwing-synth"
+name = "Mothwing Synth"
+status = "playable"
+native_version = "none"
+searches = 10
+wave = 1
+
+[[item]]
+id = 4
+slug = "copper-comp"
+name = "Copper Comp"
+status = "blocked"
+reason = "Its copy protection refuses to run on a server."
+
+[[item]]
+id = 5
+slug = "sable-eq"
+name = "Sable EQ"
+status = "native"
+native_version = "vendor"

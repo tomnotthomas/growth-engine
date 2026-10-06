@@ -1,0 +1,9 @@
+[[cluster]]
+page = "landing"
+primary = "audio plugins browser"
+volume_de = 0
+
+[[cluster]]
+page = "plugin"
+primary = "{name} online"
+volume_de = 0

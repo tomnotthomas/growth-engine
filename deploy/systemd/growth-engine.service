@@ -1,0 +1,14 @@
+# One scheduler tick. Installed as a user unit by deploy/install-wsl.sh; GROWTH_HOME comes from
+# ~/.config/growth-engine/env so the private home never appears in this public file.
+[Unit]
+Description=growth-engine: run every due job once
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/growth-engine/env
+WorkingDirectory=%h/growth-engine
+ExecStart=/usr/bin/env python3 -m growth tick
+TimeoutStartSec=3h
+Nice=10

@@ -1,0 +1,7 @@
+# gitleaks config: the default rules, plus the test fixtures' obviously fake values.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "test fixtures"
+regexes = ['''sk-must-not-leak''', '''stats-secret''']

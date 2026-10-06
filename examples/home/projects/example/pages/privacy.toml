@@ -1,0 +1,32 @@
+id = "privacy"
+kind = "legal"
+noindex = true
+sitemap = false
+
+[langs.en]
+path = "/privacy/"
+title = "Privacy | {brand}"
+description = "How {brand} handles data."
+
+[[langs.en.sections]]
+type = "intro"
+h1 = "Privacy"
+
+[[langs.en.sections]]
+type = "article"
+h2 = "What we store"
+body = [{ p = "{legal.name} stores only what the waitlist needs. Contact: [{legal.email}](mailto:{legal.email})" }]
+
+[langs.de]
+path = "/de/datenschutz/"
+title = "Datenschutz | {brand}"
+description = "Wie {brand} mit Daten umgeht."
+
+[[langs.de.sections]]
+type = "intro"
+h1 = "Datenschutz"
+
+[[langs.de.sections]]
+type = "article"
+h2 = "Was wir speichern"
+body = [{ p = "{legal.name} speichert nur, was die Warteliste braucht. Kontakt: [{legal.email}](mailto:{legal.email})" }]

@@ -1,0 +1,5 @@
+[[measurement]]
+id = "tapeworm"
+delay_ms = 18
+source = "example fixture, not a real measurement"
+measured_at = "2026-10-01"

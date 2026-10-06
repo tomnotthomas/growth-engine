@@ -1,0 +1,18 @@
+# Sites verified for automatic submission: an API or a plain form whose terms allow it,
+# with no captcha and no account. Everything else is skipped and reported.
+#
+# id is the catalogue id: the listed URL's host (without www.) and path, e.g. "site.example/submit".
+# method is "api" (JSON) or "form"; endpoint must be https on the same site. Redirects count as failure.
+# terms_allow_automation must be the boolean true, and only after reading the terms at terms_url;
+# terms_checked is the date they were read (YYYY-MM-DD).
+
+[[site]]
+id = "betahunt.example/submit"
+method = "api"
+endpoint = "https://betahunt.example/api/submit"
+terms_url = "https://betahunt.example/terms"
+terms_checked = "2026-10-01"
+terms_allow_automation = true
+captcha = false
+account = false
+fields = { name = "{brand}", url = "{base_url}", tagline = "{tagline}", description = "{description}" }

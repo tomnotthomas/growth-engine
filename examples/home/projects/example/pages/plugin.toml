@@ -1,0 +1,38 @@
+id = "plugin"
+kind = "item"
+collection = "plugins"
+index_if_any = ["clip", "measured"]
+
+[langs.en]
+path = "/plugins/{slug}/"
+title = "{name} Online | {brand}"
+description = "Run {name} in your browser with {brand}."
+crumbs = [{ text = "{brand}", href = "page:landing" }, { text = "Plugins", href = "page:plugins" }, { text = "{name}" }]
+
+[[langs.en.sections]]
+type = "item-hero"
+
+[[langs.en.sections]]
+type = "item-strip"
+h1 = "{name} **online**"
+verdict = "@verdict"
+verdict_fallback = "{name} runs in your browser with {brand}."
+cta = "waitlist"
+
+[[langs.en.sections]]
+type = "proof"
+h2 = "How {name} feels"
+measurement = "@measurement"
+text = "A real recording."
+text_pending = "A real recording goes here."
+
+[[langs.en.sections]]
+type = "faq"
+h2 = "Questions about {name}"
+items = "@faq"
+fallback = [{ q = "Does {name} run on a Mac?", a = "Yes, in the browser." }]
+
+[[langs.en.sections]]
+type = "tiles"
+h2 = "Similar plugins"
+cards = "@similar"

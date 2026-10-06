@@ -1,0 +1,8 @@
+/* The example project keeps the base theme's neutral tokens and only tunes the accent. */
+:root {
+  --accent: #ffb86b;
+  --accent-edge: #d8893a;
+  --accent-deep: #8a4b10;
+  --accent-line: rgb(255 184 107 / 0.6);
+  --glow: rgb(255 184 107 / 0.06);
+}

@@ -1,0 +1,62 @@
+id = "landing"
+kind = "landing"
+
+[langs.en]
+path = "/"
+title = "Run Audio Plugins in Your Browser | {brand}"
+description = "Play the Windows audio plugins you own in any browser, on any computer. Join the free beta."
+
+[[langs.en.sections]]
+type = "hero"
+lines = ["Your plugins.", "Anywhere."]
+sub = "Run the audio plugins you own in a browser tab. Nothing to install."
+cta = "waitlist"
+
+[[langs.en.sections]]
+type = "tiles"
+h2 = "Plugins you already own"
+text = ["Most Windows plugins run on {brand}. [See the list](page:plugins)."]
+cards = [{ title = "Tapeworm Delay", href = "item:plugins/tapeworm-delay" }, { title = "Glasshouse Reverb", href = "item:plugins/glasshouse-reverb" }]
+
+[[langs.en.sections]]
+type = "steps"
+id = "so-gehts"
+h2 = "How it works"
+items = [
+  { icon = "check", h = "Sign in", p = "Connect the store account that holds your licences." },
+  { icon = "play", h = "Open a plugin", p = "A studio PC runs it; you hear it in your tab." },
+  { icon = "pad", h = "Play", p = "Use your own keyboard and controller." },
+]
+
+[[langs.en.sections]]
+type = "faq"
+id = "fragen"
+h2 = "Questions"
+items = [{ q = "What does {brand} cost?", a = "Nothing during the beta." }]
+
+[[langs.en.sections]]
+type = "close"
+h2 = "Ready to **try it?**"
+cta = "waitlist"
+
+[langs.de]
+path = "/de/"
+title = "Audio-Plugins im Browser nutzen | {brand}"
+description = "Nutz deine Windows-Plugins in jedem Browser, auf jedem Rechner. Jetzt kostenlos zur Beta anmelden."
+
+[[langs.de.sections]]
+type = "hero"
+lines = ["Deine Plugins.", "Überall."]
+sub = "Nutz deine Audio-Plugins in einem Browser-Tab. Ohne Installation."
+cta = "waitlist"
+
+[[langs.de.sections]]
+type = "faq"
+id = "fragen"
+h2 = "Fragen"
+items = [{ q = "Was kostet {brand}?", a = "In der Beta nichts." }]
+
+[[langs.de.sections]]
+type = "close"
+h2 = "Lust, es **auszuprobieren?**"
+cta = "waitlist"
