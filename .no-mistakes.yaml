@@ -1,0 +1,31 @@
+# no-mistakes gate: `git push no-mistakes <branch>` reviews, tests, lints and
+# formats the branch in a throwaway worktree, then pushes to origin and opens
+# the PR. Commands and path rules are read from main only, so a branch cannot
+# loosen its own checks. Reference:
+# https://kunchenguid.github.io/no-mistakes/reference/repo-config/
+
+commands:
+  # The same checks CI runs (.github/workflows/ci.yml); ruff and shellcheck at
+  # CI's versions through pipx, so nothing has to be installed first.
+  test: "python3 -m unittest discover -s tests -t ."
+  # Lint runs after the docs step, right before push. The last part is a local
+  # CodeRabbit review of the branch; it skips itself (and passes) when the CLI
+  # is missing, signed out, rate-limited or offline.
+  lint: >-
+    pipx run ruff==0.13.3 check .
+    && pipx run --spec shellcheck-py==0.11.0.1 shellcheck deploy/*.sh mac/GrowthEngine/build.sh scripts/*.sh
+    && for f in growth/assets/*.js growth/waitlist/*.js; do node --check "$f" || exit 1; done
+    && mac/GrowthEngine/build.sh
+    && scripts/coderabbit-review.sh
+  format: "pipx run ruff==0.13.3 check --fix ."
+
+review:
+  path_instructions:
+    - path: "**"
+      instructions: |
+        Ponytail lens (github.com/DietrichGebert/ponytail): is this more code
+        than the task needs? Flag code the task does not need, home-grown
+        copies of something the repo, the platform or an existing dependency
+        already provides, new dependencies that are not needed, and
+        speculative abstractions or options nobody asked for. Never ask to
+        cut validation, error handling, security or accessibility.
