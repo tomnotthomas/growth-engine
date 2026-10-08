@@ -29,3 +29,10 @@ review:
         already provides, new dependencies that are not needed, and
         speculative abstractions or options nobody asked for. Never ask to
         cut validation, error handling, security or accessibility.
+    - path: "**"
+      instructions: |
+        Adversarial lens: actively try to break the change. Look for inputs
+        that produce a wrong result or a crash, races, security holes, and
+        callers broken by a changed signature or behaviour. Report a finding
+        only with a concrete case (input, state or call sequence) that shows
+        it; no speculative "might" findings.
