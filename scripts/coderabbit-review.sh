@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Local CodeRabbit review of this branch's changes against the base, the last part of the
 # no-mistakes lint command. Fails on findings. Fails open (prints a skip line, exits 0) when the
-# CLI is missing, signed out, rate-limited, offline or otherwise does not finish a review.
+# CLI is missing, signed out, rate-limited, offline or otherwise does not finish a review within 15 minutes.
 #   scripts/coderabbit-review.sh [base-ref]   default: origin/HEAD, else origin/main, else main
 set -uo pipefail
 
@@ -19,9 +19,8 @@ done
 [ "$(git rev-parse HEAD)" != "$base" ] || skip "no changes against the base"
 
 # --fresh: a rerun otherwise reuses the last checkpoint and reports 0 findings.
-limit=()
-command -v timeout > /dev/null 2>&1 && limit=(timeout 900)
-out="$(${limit[@]+"${limit[@]}"} coderabbit review --agent --fresh --base-commit "$base" 2>&1)"
+# 15-minute cap through perl's alarm: macOS has no `timeout` unless coreutils is installed.
+out="$(perl -e 'alarm shift; exec @ARGV' 900 coderabbit review --agent --fresh --base-commit "$base" 2>&1)"
 
 done_line="$(grep '"type":"complete"' <<< "$out" | tail -1)"
 if [ -z "$done_line" ]; then
@@ -36,10 +35,10 @@ for line in sys.stdin:
     print("\n[%s] %s" % (f.get("severity", "?"), f.get("fileName", "?")))
     print((f.get("codegenInstructions") or f.get("comment") or "").split("\n\n", 1)[-1])
 '
-read -r outcome count <<< "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("outcome"), d.get("findings", 0))' "$done_line")"
+read -r status count <<< "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d.get("status"), d.get("findings", 0))' "$done_line")"
 if [ "$count" -gt 0 ]; then
   echo "coderabbit: $count finding(s)"
   exit 1
 fi
-[ "$outcome" = completed ] || skip "review outcome: $outcome"
+[ "$status" = review_completed ] || skip "review status: $status"
 echo "coderabbit: no findings"
